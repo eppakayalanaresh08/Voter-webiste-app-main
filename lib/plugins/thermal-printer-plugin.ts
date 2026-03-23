@@ -44,6 +44,7 @@ export interface ThermalPrinterPlugin {
   isConnected(): Promise<NativeConnectionState>;
   printText(options: { text: string }): Promise<NativePrintResult>;
   printVoter(options: NativePrintVoterPayload): Promise<NativePrintResult>;
+  printImage(options: { dataUrl: string }): Promise<NativePrintResult>;
 }
 
 export const NativeThermalPrinter = registerPlugin<ThermalPrinterPlugin>('ThermalPrinter');

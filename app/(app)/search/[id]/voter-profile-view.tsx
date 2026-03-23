@@ -2,7 +2,7 @@
 
 import NextLink from "next/link";
 import EditRoundedIcon from "@mui/icons-material/EditRounded";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Box,
@@ -21,14 +21,9 @@ import {
 } from "@mui/material";
 import { useParams } from "next/navigation";
 import {
-  getDefaultFieldTemplates,
   templateByType,
   type FieldContentTemplate,
 } from "@/lib/field-content-shared";
-import {
-  appendImageToMessage,
-  renderMessageTemplate,
-} from "@/lib/message-templates";
 import { db, enrich, type OfflineVoter } from "@/lib/offline-db";
 import { syncPending } from "@/lib/offline-sync";
 import {
@@ -40,8 +35,14 @@ import {
 } from "@/lib/native-bridge";
 import {
   isNativePrinterPending,
-  printVoterSlip,
+  printVoterSlipImage,
 } from "@/lib/native-printer";
+import {
+  parseThermalPrintTemplateConfig,
+  resolveThermalPrintTemplate,
+} from "@/lib/thermal-print-template";
+import { renderMessageTemplate } from "@/lib/message-templates";
+import { renderVoterSlipDataUrl } from "@/lib/voter-slip-renderer";
 
 type EditableVoterFields = Pick<
   OfflineVoter,
@@ -93,9 +94,7 @@ export default function VoterProfileClient() {
   const [status, setStatus] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
-  const [templates, setTemplates] = useState<FieldContentTemplate[]>(() =>
-    getDefaultFieldTemplates(),
-  );
+  const [templates, setTemplates] = useState<FieldContentTemplate[]>([]);
   const [editorMode, setEditorMode] = useState<EditorMode>(null);
   const [draft, setDraft] = useState<EditableVoterFields>({
     mobile_no: "",
@@ -177,11 +176,11 @@ export default function VoterProfileClient() {
         const json = (await res.json().catch(() => null)) as {
           templates?: FieldContentTemplate[];
         } | null;
-        if (res.ok && json?.templates?.length) {
+        if (res.ok && json?.templates) {
           setTemplates(json.templates);
         }
       } catch {
-        // Keep defaults if tenant content is unavailable.
+        // Keep empty state if tenant content is unavailable.
       }
     };
 
@@ -191,6 +190,14 @@ export default function VoterProfileClient() {
   const whatsappTemplate = useMemo(
     () => templateByType(templates, "WHATSAPP"),
     [templates],
+  );
+  const thermalPrintTemplate = useMemo(
+    () => resolveThermalPrintTemplate(templates),
+    [templates],
+  );
+  const thermalPrintConfig = useMemo(
+    () => parseThermalPrintTemplateConfig(thermalPrintTemplate?.body),
+    [thermalPrintTemplate?.body],
   );
 
   const outreachText = useMemo(() => {
@@ -206,9 +213,9 @@ export default function VoterProfileClient() {
 
   const whatsappText = useMemo(() => {
     if (!voter) return "";
-    const rendered = renderMessageTemplate(whatsappTemplate.body, voter);
-    return appendImageToMessage(rendered, whatsappTemplate.imageUrl);
-  }, [voter, whatsappTemplate.body, whatsappTemplate.imageUrl]);
+    if (!whatsappTemplate?.body) return outreachText;
+    return renderMessageTemplate(whatsappTemplate.body, voter);
+  }, [voter, whatsappTemplate?.body, outreachText]);
 
   const logAction = async (actionType: string, payload?: unknown) => {
     if (!voter) return;
@@ -289,56 +296,19 @@ export default function VoterProfileClient() {
   };
 
   const [isSendingWa, setIsSendingWa] = useState(false);
-  const voterCardRef = useRef<HTMLDivElement | null>(null);
   const nativeApp = isNativeApp();
-
-  const HEADER_IMAGE_URL =
-    "https://firebasestorage.googleapis.com/v0/b/sunya-mobile-app.firebasestorage.app/o/profile_images%2FshzVDMSFFMP9ry5iYhtdWXr0R9m2_1772129528897?alt=media&token=a5cdd474-1b2c-4d95-a90c-57216383c43e";
+  const shareImageUrl = whatsappTemplate?.imageUrl ?? null;
+  const thermalPrintImageUrl = thermalPrintTemplate?.imageUrl ?? null;
 
   const generateVoterCardBlob = async (): Promise<Blob> => {
-    if (!voterCardRef.current) throw new Error("Voter card element not found");
-
-    const html2canvasModule = await import("html2canvas");
-    const voterCanvas = await html2canvasModule.default(voterCardRef.current, {
-      scale: 2,
-      useCORS: true,
-      backgroundColor: "#ffffff",
-      logging: false,
-    });
-
-    const headerImg = await new Promise<HTMLImageElement | null>((resolve) => {
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      img.onload = () => resolve(img);
-      img.onerror = () => resolve(null);
-      img.src = HEADER_IMAGE_URL;
-    });
-
-    const cardW = voterCanvas.width;
-    const headerH = headerImg
-      ? Math.round((headerImg.naturalHeight / headerImg.naturalWidth) * cardW)
-      : 0;
-
-    const combined = document.createElement("canvas");
-    combined.width = cardW;
-    combined.height = headerH + voterCanvas.height;
-
-    const ctx = combined.getContext("2d")!;
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(0, 0, combined.width, combined.height);
-
-    if (headerImg) {
-      ctx.drawImage(headerImg, 0, 0, cardW, headerH);
+    if (!shareImageUrl) {
+      throw new Error("No WhatsApp template image configured.");
     }
-
-    ctx.drawImage(voterCanvas, 0, headerH);
-
-    const blob = await new Promise<Blob | null>((resolve) => {
-      combined.toBlob((b) => resolve(b), "image/png", 1);
-    });
-
-    if (!blob) throw new Error("Failed to generate combined image");
-    return blob;
+    const response = await fetch(shareImageUrl);
+    if (!response.ok) {
+      throw new Error("Failed to load WhatsApp share image");
+    }
+    return response.blob();
   };
 
   const downloadBlob = (blob: Blob, fileName: string) => {
@@ -435,18 +405,24 @@ export default function VoterProfileClient() {
                       ? "Opening native printer bridge..."
                       : "Connecting to printer...",
                   );
-                  await printVoterSlip({
-                    voter_name: voter.voter_name,
-                    voter_name_tamil: voter.voter_name_tamil,
-                    booth_no: voter.booth_no,
-                    epic_id: voter.epic_id,
-                    house_no: voter.house_no,
-                    serial_no: voter.serial_no,
-                    booth_name: voter.booth_name,
-                    mobile_no: voter.mobile_no,
-                  });
+                  const slipDataUrl = await renderVoterSlipDataUrl(
+                    {
+                      voter_name: voter.voter_name,
+                      relation_name: voter.relation_name,
+                      epic_id: voter.epic_id,
+                      booth_no: voter.booth_no,
+                      serial_no: voter.serial_no,
+                      booth_name: voter.booth_name,
+                      booth_address: voter.booth_address,
+                    },
+                    {
+                      imageUrl: thermalPrintImageUrl ?? undefined,
+                      template: thermalPrintConfig,
+                    },
+                  );
+                  await printVoterSlipImage(slipDataUrl);
                   await logAction("THERMAL_PRINTED");
-                  setStatus("Sent to thermal printer. 🖨️");
+                  setStatus("Sent to thermal printer.");
                 } catch (error) {
                   console.error(error);
                   setStatus(
@@ -531,7 +507,7 @@ export default function VoterProfileClient() {
                 if (!voter) return;
                 const phone = normalizeWhatsappPhone(voter.mobile_no);
                 if (!phone) {
-                  setStatus("❌ No valid phone number found.");
+                  setStatus("No valid phone number found.");
                   return;
                 }
 
@@ -543,14 +519,14 @@ export default function VoterProfileClient() {
                   } catch (error) {
                     const message =
                       error instanceof Error ? error.message : String(error);
-                    setStatus(`❌ WhatsApp open failed: ${message}`);
+                    setStatus(`WhatsApp open failed: ${message}`);
                   }
                   return;
                 }
 
                 try {
                   setIsSendingWa(true);
-                  setStatus("⏳ Generating card & sending via WhatsApp...");
+                  setStatus("Generating card and sending via WhatsApp...");
 
                   const blob = await generateVoterCardBlob();
                   const file = new File(
@@ -593,12 +569,12 @@ export default function VoterProfileClient() {
                   }
 
                   await logAction("WHATSAPP_SENT", { phone: toPhone });
-                  setStatus("✅ WhatsApp message sent automatically!");
+                  setStatus("WhatsApp message sent automatically.");
                 } catch (error: unknown) {
                   const message =
                     error instanceof Error ? error.message : String(error);
                   console.error("WhatsApp Error:", message);
-                  setStatus(`❌ WhatsApp failed: ${message}`);
+                  setStatus(`WhatsApp failed: ${message}`);
                 } finally {
                   setIsSendingWa(false);
                 }
@@ -894,155 +870,6 @@ export default function VoterProfileClient() {
           </Button>
         </DialogActions>
       </Dialog>
-
-      {/* Hidden share card for html2canvas */}
-      <Box
-        sx={{
-          position: "fixed",
-          left: -99999,
-          top: 0,
-          width: 720,
-          pointerEvents: "none",
-          zIndex: -1,
-        }}
-      >
-        <Box
-          ref={voterCardRef}
-          sx={{
-            width: 720,
-            bgcolor: "#ffffff",
-            color: "#111827",
-            borderRadius: 3,
-            overflow: "hidden",
-            border: "2px solid #e5e7eb",
-            fontFamily: "Arial, sans-serif",
-          }}
-        >
-          <Box sx={{ px: 3, py: 2, bgcolor: "#1976d2", color: "#fff" }}>
-            <Typography sx={{ fontSize: 28, fontWeight: 800 }}>
-              Voter Details
-            </Typography>
-            <Typography sx={{ fontSize: 14, opacity: 0.95 }}>
-              Booth Information Slip
-            </Typography>
-          </Box>
-
-          <Box sx={{ p: 3 }}>
-            <Grid container spacing={2}>
-              <Grid item xs={12}>
-                <Typography sx={{ fontSize: 30, fontWeight: 800 }}>
-                  {voter.voter_name ?? "-"}
-                </Typography>
-                {!!voter.voter_name_tamil && (
-                  <Typography sx={{ mt: 0.5, fontSize: 18, color: "#4b5563" }}>
-                    {voter.voter_name_tamil}
-                  </Typography>
-                )}
-              </Grid>
-
-              <Grid item xs={6}>
-                <Box
-                  sx={{ p: 2, border: "1px solid #e5e7eb", borderRadius: 2 }}
-                >
-                  <Typography sx={{ fontSize: 12, color: "#6b7280" }}>
-                    EPIC ID
-                  </Typography>
-                  <Typography sx={{ mt: 0.5, fontSize: 22, fontWeight: 700 }}>
-                    {voter.epic_id ?? "-"}
-                  </Typography>
-                </Box>
-              </Grid>
-
-              <Grid item xs={6}>
-                <Box
-                  sx={{ p: 2, border: "1px solid #e5e7eb", borderRadius: 2 }}
-                >
-                  <Typography
-                    sx={{ fontSize: 12, color: "#6b7280", fontWeight: 600 }}
-                  >
-                    Booth {voter.booth_no ?? "-"}
-                  </Typography>
-                  <Typography
-                    sx={{
-                      mt: 0.5,
-                      fontSize: 16,
-                      fontWeight: 400,
-                      color: "#1976d2",
-                    }}
-                  >
-                    {voter.booth_name || "-"}
-                  </Typography>
-                </Box>
-              </Grid>
-
-              <Grid item xs={6}>
-                <Box
-                  sx={{ p: 2, border: "1px solid #e5e7eb", borderRadius: 2 }}
-                >
-                  <Typography sx={{ fontSize: 12, color: "#6b7280" }}>
-                    House No
-                  </Typography>
-                  <Typography sx={{ mt: 0.5, fontSize: 20, fontWeight: 700 }}>
-                    {voter.house_no ?? "-"}
-                  </Typography>
-                </Box>
-              </Grid>
-
-              <Grid item xs={6}>
-                <Box
-                  sx={{ p: 2, border: "1px solid #e5e7eb", borderRadius: 2 }}
-                >
-                  <Typography sx={{ fontSize: 12, color: "#6b7280" }}>
-                    Phone
-                  </Typography>
-                  <Typography sx={{ mt: 0.5, fontSize: 20, fontWeight: 700 }}>
-                    {voter.mobile_no ?? "-"}
-                  </Typography>
-                </Box>
-              </Grid>
-
-              <Grid item xs={6}>
-                <Box
-                  sx={{ p: 2, border: "1px solid #e5e7eb", borderRadius: 2 }}
-                >
-                  <Typography sx={{ fontSize: 12, color: "#6b7280" }}>
-                    Serial No
-                  </Typography>
-                  <Typography sx={{ mt: 0.5, fontSize: 20, fontWeight: 700 }}>
-                    {voter.serial_no ?? "-"}
-                  </Typography>
-                </Box>
-              </Grid>
-
-              <Grid item xs={6}>
-                <Box
-                  sx={{ p: 2, border: "1px solid #e5e7eb", borderRadius: 2 }}
-                >
-                  <Typography sx={{ fontSize: 12, color: "#6b7280" }}>
-                    Age
-                  </Typography>
-                  <Typography sx={{ mt: 0.5, fontSize: 20, fontWeight: 700 }}>
-                    {voter.age ?? "-"}
-                  </Typography>
-                </Box>
-              </Grid>
-
-              <Grid item xs={12}>
-                <Box
-                  sx={{ p: 2, border: "1px solid #e5e7eb", borderRadius: 2 }}
-                >
-                  <Typography sx={{ fontSize: 12, color: "#6b7280" }}>
-                    Booth Name
-                  </Typography>
-                  <Typography sx={{ mt: 0.5, fontSize: 18, fontWeight: 700 }}>
-                    {voter.booth_name ?? "-"}
-                  </Typography>
-                </Box>
-              </Grid>
-            </Grid>
-          </Box>
-        </Box>
-      </Box>
     </Stack>
   );
 }

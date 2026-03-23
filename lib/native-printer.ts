@@ -15,11 +15,16 @@ const PREFERRED_PRINTER_MAC_KEY = 'clickvote.nativePrinter.mac';
 
 interface PrinterBridge {
   printVoter(voter: PrinterVoterPayload, options?: NativePrinterOptions): Promise<void>;
+  printImage(dataUrl: string, options?: NativePrinterOptions): Promise<void>;
 }
 
 class WebBluetoothPrinterBridge implements PrinterBridge {
   async printVoter(voter: PrinterVoterPayload) {
     await thermalPrinter.printVoter(voter);
+  }
+
+  async printImage(dataUrl: string) {
+    await thermalPrinter.printImageDataUrl(dataUrl);
   }
 }
 
@@ -53,6 +58,28 @@ class NativeCapacitorPrinterBridge implements PrinterBridge {
       boothName: voter.booth_name,
       mobileNo: voter.mobile_no
     });
+  }
+
+  async printImage(dataUrl: string, options?: NativePrinterOptions) {
+    const preferredMac = normalizeMacAddress(options?.macAddress ?? getPreferredNativePrinterMac());
+    const connection: NativeConnectionState = await NativeThermalPrinter.isConnected().catch(() => ({
+      connected: false
+    }));
+
+    const shouldReconnect =
+      !connection.connected ||
+      (preferredMac &&
+        connection.address &&
+        connection.address.toUpperCase() !== preferredMac.toUpperCase());
+
+    if (shouldReconnect) {
+      if (connection.connected) {
+        await NativeThermalPrinter.disconnect().catch(() => undefined);
+      }
+      await NativeThermalPrinter.connect(preferredMac ? { macAddress: preferredMac } : undefined);
+    }
+
+    await NativeThermalPrinter.printImage({ dataUrl });
   }
 }
 
@@ -129,4 +156,8 @@ export async function printNativeTestText(text = 'ClickVote printer test\n\n') {
 
 export async function printVoterSlip(voter: PrinterVoterPayload, options?: NativePrinterOptions) {
   await getPrinterBridge().printVoter(voter, options);
+}
+
+export async function printVoterSlipImage(dataUrl: string, options?: NativePrinterOptions) {
+  await getPrinterBridge().printImage(dataUrl, options);
 }

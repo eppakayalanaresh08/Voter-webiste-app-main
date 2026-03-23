@@ -149,6 +149,21 @@ export class ThermalPrinter {
     await new Promise((r) => setTimeout(r, 50));
   }
 
+  private async loadCanvasFromDataUrl(dataUrl: string) {
+    const image = new Image();
+    image.decoding = 'sync';
+    image.src = dataUrl;
+    await image.decode();
+
+    const canvas = document.createElement('canvas');
+    canvas.width = image.width;
+    canvas.height = image.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) throw new Error('No 2D context');
+    ctx.drawImage(image, 0, 0);
+    return canvas;
+  }
+
   // ─── Public print methods ─────────────────────────────────────────────────────
 
   /**
@@ -243,6 +258,16 @@ export class ThermalPrinter {
     cmds.push(new Uint8Array([0x1d, 0x56, 0x41, 0x00])); // Cut
 
     for (const cmd of cmds) await this.writeBytes(cmd);
+  }
+
+  async printImageDataUrl(dataUrl: string) {
+    if (!this.characteristic) await this.connect();
+    if (!this.characteristic) throw new Error('Printer not connected');
+
+    const canvas = await this.loadCanvasFromDataUrl(dataUrl);
+    const { data, width, height } = this.canvasToBitmap(canvas);
+    await this.printBitmap(data, width, height);
+    await this.writeBytes(new Uint8Array([0x1d, 0x56, 0x00]));
   }
 }
 

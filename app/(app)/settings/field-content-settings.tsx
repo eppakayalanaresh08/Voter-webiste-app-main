@@ -1,8 +1,6 @@
 'use client';
 
 import AddPhotoAlternateRoundedIcon from '@mui/icons-material/AddPhotoAlternateRounded';
-import ArrowDownwardRoundedIcon from '@mui/icons-material/ArrowDownwardRounded';
-import ArrowUpwardRoundedIcon from '@mui/icons-material/ArrowUpwardRounded';
 import DeleteOutlineRoundedIcon from '@mui/icons-material/DeleteOutlineRounded';
 import SaveRoundedIcon from '@mui/icons-material/SaveRounded';
 import {
@@ -26,8 +24,14 @@ import {
   type FieldContentTemplate,
   type TemplateType
 } from '@/lib/field-content-shared';
-import { appendImageToMessage, renderMessageTemplate } from '@/lib/message-templates';
+import { renderMessageTemplate } from '@/lib/message-templates';
 import type { OfflineVoter } from '@/lib/offline-db';
+import {
+  buildThermalPrintPreview,
+  parseThermalPrintTemplateConfig,
+  stringifyThermalPrintTemplateConfig,
+  type ThermalPrintTemplateConfig
+} from '@/lib/thermal-print-template';
 
 type BannerDraft = FieldContentBanner & {
   localKey: string;
@@ -45,9 +49,9 @@ const SAMPLE_VOTER: OfflineVoter = {
   booth_no: '24',
   serial_no: '118',
   voter_name: 'Ravi Kumar',
-  voter_name_tamil: 'రవి కుమార్',
+  voter_name_tamil: 'ரவி குமார்',
   relation_name: 'Suresh Kumar',
-  relation_name_tamil: 'సురేష్ కుమార్',
+  relation_name_tamil: 'சுரேஷ் குமார்',
   epic_id: 'ABC1234567',
   sex: 'Male',
   age: 41,
@@ -67,8 +71,56 @@ const SAMPLE_VOTER: OfflineVoter = {
   updated_at: new Date(0).toISOString()
 };
 
+const THERMAL_TEXT_FIELDS: Array<{
+  key: keyof ThermalPrintTemplateConfig;
+  label: string;
+  rows?: number;
+}> = [
+  { key: 'headerLine1', label: 'Header Line 1' },
+  { key: 'headerLine2', label: 'Header Line 2' },
+  { key: 'headerLine3', label: 'Header Line 3' },
+  { key: 'relationLabel', label: 'Relation Label' },
+  { key: 'epicLabel', label: 'EPIC Label' },
+  { key: 'boothLabel', label: 'Booth Label' },
+  { key: 'serialLabel', label: 'Serial Label' },
+  { key: 'pollBoothLabel', label: 'Poll Booth Label' },
+  { key: 'voteOnLabel', label: 'Vote On Label' },
+  { key: 'printedOnLabel', label: 'Printed On Label' },
+  { key: 'cutLineText', label: 'Cut Line Text' },
+  { key: 'appealLine1', label: 'Footer Appeal Line 1' },
+  { key: 'appealLine2', label: 'Footer Appeal Line 2' },
+  { key: 'appealLineTamil', label: 'Footer Tamil Text', rows: 3 },
+  { key: 'candidateLine1', label: 'Candidate Line 1' },
+  { key: 'candidateLine2', label: 'Candidate Line 2' },
+  { key: 'candidateLine3', label: 'Candidate Line 3' },
+  { key: 'candidateLine4', label: 'Candidate Line 4' }
+];
+
 function templateLabel(type: TemplateType) {
-  return 'WhatsApp';
+  return type === 'THERMAL_PRINT' ? 'Thermal Print' : 'WhatsApp';
+}
+
+function templateImageLabel(type: TemplateType) {
+  return type === 'THERMAL_PRINT' ? 'Print Image' : 'Template Image';
+}
+
+function templateImageHelp(type: TemplateType) {
+  return type === 'THERMAL_PRINT'
+    ? 'Only one print image is stored for this template. Uploading a new image replaces the old one and prints in the footer area of the thermal slip.'
+    : 'Only one image is stored for this template. Uploading a new image replaces the old one and is used in message sharing.';
+}
+
+function createEmptyTemplate(type: TemplateType): FieldContentTemplate {
+  return {
+    id: null,
+    type,
+    name: type === 'THERMAL_PRINT' ? 'Thermal Print Template' : 'WhatsApp Template',
+    body: type === 'THERMAL_PRINT' ? stringifyThermalPrintTemplateConfig(parseThermalPrintTemplateConfig(undefined)) : '',
+    enabled: true,
+    imagePath: null,
+    imageUrl: null,
+    updatedAt: null
+  };
 }
 
 export default function FieldContentSettings({
@@ -91,10 +143,15 @@ export default function FieldContentSettings({
     () => TEMPLATE_TYPES.map((type) => templates.find((template) => template.type === type)!).filter(Boolean),
     [templates]
   );
+  const whatsappTemplate = templates.find((template) => template.type === 'WHATSAPP') ?? null;
+  const thermalTemplate = templates.find((template) => template.type === 'THERMAL_PRINT') ?? null;
 
   const getPreviewText = (template: FieldContentTemplate) => {
-    const rendered = renderMessageTemplate(template.body, SAMPLE_VOTER);
-    return appendImageToMessage(rendered, template.imageUrl);
+    if (template.type === 'THERMAL_PRINT') {
+      return buildThermalPrintPreview(parseThermalPrintTemplateConfig(template.body), SAMPLE_VOTER);
+    }
+
+    return renderMessageTemplate(template.body, SAMPLE_VOTER);
   };
 
   const replaceBanners = (nextBanners: FieldContentBanner[], options?: { discardLocalKeys?: string[] }) => {
@@ -127,11 +184,47 @@ export default function FieldContentSettings({
     setTemplates((current) => current.map((template) => (template.type === type ? { ...template, ...patch } : template)));
   };
 
-  const uploadImage = async (file: File, kind: 'banner' | 'template', templateType?: TemplateType) => {
+  const addTemplate = (type: TemplateType) => {
+    setTemplates((current) => {
+      if (current.some((template) => template.type === type)) {
+        return current;
+      }
+
+      return [...current, createEmptyTemplate(type)];
+    });
+    setNotice(`${templateLabel(type)} template added. Fill the fields and save.`);
+    setError('');
+  };
+
+  const setThermalTemplateField = (
+    templateType: TemplateType,
+    key: keyof ThermalPrintTemplateConfig,
+    value: string
+  ) => {
+    setTemplates((current) =>
+      current.map((template) => {
+        if (template.type !== templateType || template.type !== 'THERMAL_PRINT') {
+          return template;
+        }
+
+        const config = parseThermalPrintTemplateConfig(template.body);
+        return {
+          ...template,
+          body: stringifyThermalPrintTemplateConfig({
+            ...config,
+            [key]: value
+          })
+        };
+      })
+    );
+  };
+
+  const uploadImage = async (file: File, kind: 'banner' | 'template', options?: { templateType?: TemplateType; existingPath?: string | null }) => {
     const form = new FormData();
     form.append('file', file);
     form.append('kind', kind);
-    if (templateType) form.append('templateType', templateType);
+    if (options?.templateType) form.append('templateType', options.templateType);
+    if (options?.existingPath) form.append('existingPath', options.existingPath);
 
     const res = await fetch('/api/field-content/media', { method: 'POST', body: form });
     const json = (await res.json().catch(() => null)) as { error?: string; imagePath?: string; imageUrl?: string } | null;
@@ -157,7 +250,6 @@ export default function FieldContentSettings({
           title: banner.title,
           subtitle: banner.subtitle,
           enabled: banner.enabled,
-          sortOrder: banner.sortOrder,
           imagePath: banner.imagePath
         })
       });
@@ -176,7 +268,23 @@ export default function FieldContentSettings({
     }
   };
 
-  const saveTemplate = async (template: FieldContentTemplate) => {
+  const saveTemplate = async (templateType: TemplateType, templateOverride?: FieldContentTemplate) => {
+    const template = templateOverride ?? templates.find((entry) => entry.type === templateType);
+    if (!template) {
+      setError('Unable to find template to save');
+      return;
+    }
+
+    if (!template.name.trim()) {
+      setError(`${templateLabel(templateType)} template name is required.`);
+      return;
+    }
+
+    if (!template.body.trim()) {
+      setError(`${templateLabel(templateType)} template body is required.`);
+      return;
+    }
+
     setBusyKey(`template:${template.type}`);
     setNotice('');
     setError('');
@@ -208,6 +316,32 @@ export default function FieldContentSettings({
     }
   };
 
+  const deleteTemplate = async (templateType: TemplateType) => {
+    setBusyKey(`template-delete:${templateType}`);
+    setNotice('');
+    setError('');
+
+    try {
+      const res = await fetch('/api/field-content/templates', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: templateType })
+      });
+
+      const json = (await res.json().catch(() => null)) as { error?: string; templates?: FieldContentTemplate[] } | null;
+      if (!res.ok || !json?.templates) {
+        throw new Error(json?.error ?? 'Unable to delete template');
+      }
+
+      setTemplates(json.templates);
+      setNotice(`${templateLabel(templateType)} template deleted.`);
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : 'Unable to delete template');
+    } finally {
+      setBusyKey('');
+    }
+  };
+
   const addBanner = () => {
     setBanners((current) => [
       ...current,
@@ -223,60 +357,6 @@ export default function FieldContentSettings({
         updatedAt: null
       }
     ]);
-  };
-
-  const persistBannerOrder = async (orderedBanners: BannerDraft[]) => {
-    const items = orderedBanners
-      .filter((banner) => Boolean(banner.id))
-      .map((banner, index) => ({
-        id: banner.id!,
-        sortOrder: index
-      }));
-
-    if (!items.length) return;
-
-    const res = await fetch('/api/field-content/banners', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items })
-    });
-    const json = (await res.json().catch(() => null)) as { error?: string; banners?: FieldContentBanner[] } | null;
-
-    if (!res.ok || !json?.banners) {
-      throw new Error(json?.error ?? 'Unable to update banner order');
-    }
-
-    replaceBanners(json.banners);
-  };
-
-  const moveBanner = async (localKey: string, direction: -1 | 1) => {
-    const index = banners.findIndex((banner) => banner.localKey === localKey);
-    const targetIndex = index + direction;
-
-    if (index < 0 || targetIndex < 0 || targetIndex >= banners.length) return;
-
-    const reordered = [...banners];
-    const [moved] = reordered.splice(index, 1);
-    reordered.splice(targetIndex, 0, moved);
-
-    const normalized = reordered.map((banner, nextIndex) => ({ ...banner, sortOrder: nextIndex }));
-    setBanners(normalized);
-
-    const hasPersistedBanner = normalized.some((banner) => Boolean(banner.id));
-    if (!hasPersistedBanner) return;
-
-    setBusyKey(`banner-order:${localKey}`);
-    setNotice('');
-    setError('');
-
-    try {
-      await persistBannerOrder(normalized);
-      setNotice('Banner order updated.');
-    } catch (orderError) {
-      setError(orderError instanceof Error ? orderError.message : 'Unable to update banner order');
-    } finally {
-      setBusyKey('');
-    }
   };
 
   const deleteBanner = async (banner: BannerDraft) => {
@@ -334,6 +414,9 @@ export default function FieldContentSettings({
                 <Typography variant="body2" color="text.secondary">
                   These images power the user onboarding slideshow and the home banner card.
                 </Typography>
+                <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
+                  Manual up and down ordering is disabled for the current banner table.
+                </Typography>
               </Box>
               {canEdit && (
                 <Button variant="outlined" onClick={addBanner}>
@@ -347,21 +430,69 @@ export default function FieldContentSettings({
                 <Card key={banner.localKey} variant="outlined">
                   <CardContent>
                     <Stack spacing={1.5}>
-                      {banner.imageUrl && (
-                        <Box
-                          component="img"
-                          src={banner.imageUrl}
-                          alt={banner.title || 'Banner preview'}
-                          sx={{
-                            width: '100%',
-                            height: 160,
-                            objectFit: 'cover',
-                            borderRadius: 3,
-                            border: '1px solid',
-                            borderColor: 'divider'
-                          }}
+                      <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
+                        <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                          {index === 0 ? 'Home Banner' : `Onboarding Banner ${index}`}
+                        </Typography>
+                        <Chip
+                          size="small"
+                          label={index === 0 ? 'Shown on Home' : 'Shown in Onboarding'}
+                          color={index === 0 ? 'primary' : 'default'}
+                          variant={index === 0 ? 'filled' : 'outlined'}
                         />
-                      )}
+                      </Stack>
+
+                      <Box
+                        sx={{
+                          position: 'relative',
+                          width: '100%',
+                          height: 160,
+                          borderRadius: 3,
+                          overflow: 'hidden',
+                          border: '1px solid',
+                          borderColor: 'divider',
+                          backgroundColor: 'action.hover',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}
+                      >
+                        {banner.imageUrl ? (
+                          <Box
+                            component="img"
+                            src={banner.imageUrl}
+                            alt={banner.title || 'Banner preview'}
+                            sx={{
+                              width: '100%',
+                              height: '100%',
+                              objectFit: 'cover'
+                            }}
+                          />
+                        ) : (
+                          <Stack alignItems="center" spacing={1} sx={{ color: 'text.disabled' }}>
+                            <AddPhotoAlternateRoundedIcon sx={{ fontSize: 40 }} />
+                            <Typography variant="caption">No image uploaded</Typography>
+                          </Stack>
+                        )}
+
+                        {busyKey === `banner:${banner.localKey}` && (
+                          <Box
+                            sx={{
+                              position: 'absolute',
+                              inset: 0,
+                              backgroundColor: 'rgba(255, 255, 255, 0.7)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              zIndex: 1
+                            }}
+                          >
+                            <Typography variant="button" color="primary" sx={{ fontWeight: 700 }}>
+                              Uploading...
+                            </Typography>
+                          </Box>
+                        )}
+                      </Box>
 
                       <TextField
                         label="Title"
@@ -395,22 +526,6 @@ export default function FieldContentSettings({
                         {canEdit && (
                           <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
                             <Button
-                              variant="text"
-                              startIcon={<ArrowUpwardRoundedIcon />}
-                              onClick={() => void moveBanner(banner.localKey, -1)}
-                              disabled={index === 0 || busyKey.startsWith('banner-order:')}
-                            >
-                              Up
-                            </Button>
-                            <Button
-                              variant="text"
-                              startIcon={<ArrowDownwardRoundedIcon />}
-                              onClick={() => void moveBanner(banner.localKey, 1)}
-                              disabled={index === banners.length - 1 || busyKey.startsWith('banner-order:')}
-                            >
-                              Down
-                            </Button>
-                            <Button
                               component="label"
                               variant="outlined"
                               startIcon={<AddPhotoAlternateRoundedIcon />}
@@ -430,9 +545,13 @@ export default function FieldContentSettings({
                                   setError('');
 
                                   try {
-                                    const image = await uploadImage(file, 'banner');
+                                    const image = await uploadImage(file, 'banner', { existingPath: banner.imagePath });
+                                    const updatedBanner = { ...banner, ...image };
                                     setBannerField(banner.localKey, image);
-                                    setNotice('Banner image uploaded. Save banner to publish it.');
+                                    setNotice('Banner image uploaded. Saving...');
+                                    
+                                    // Auto-save the banner to make it truly dynamic
+                                    await saveBanner(updatedBanner);
                                   } catch (uploadError) {
                                     setError(uploadError instanceof Error ? uploadError.message : 'Image upload failed');
                                   } finally {
@@ -474,14 +593,30 @@ export default function FieldContentSettings({
       <Card>
         <CardContent>
           <Stack spacing={1.75}>
-            <Box>
-              <Typography variant="h6" sx={{ fontWeight: 700 }}>
-                Dynamic Communication Templates
-              </Typography>
-              <Typography variant="body2" color="text.secondary">
-                Use voter fields inside the message body.
-              </Typography>
-            </Box>
+            <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1.5}>
+              <Box>
+                <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                  Dynamic Communication Templates
+                </Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Use voter fields inside the message body and thermal print labels.
+                </Typography>
+              </Box>
+              {canEdit && (
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                  {!templates.some((template) => template.type === 'WHATSAPP') && (
+                    <Button variant="outlined" onClick={() => addTemplate('WHATSAPP')}>
+                      Add WhatsApp
+                    </Button>
+                  )}
+                  {!templates.some((template) => template.type === 'THERMAL_PRINT') && (
+                    <Button variant="outlined" onClick={() => addTemplate('THERMAL_PRINT')}>
+                      Add Thermal
+                    </Button>
+                  )}
+                </Stack>
+              )}
+            </Stack>
 
             <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
               {FIELD_TEMPLATE_TOKENS.map((token) => (
@@ -490,42 +625,78 @@ export default function FieldContentSettings({
             </Stack>
 
             <Stack spacing={1.5}>
-              {sortedTemplates.map((template) => (
-                <Card key={template.type} variant="outlined">
+              {!sortedTemplates.length && (
+                <Alert severity="info">
+                  No templates created yet. Use Add WhatsApp or Add Thermal to create the first template.
+                </Alert>
+              )}
+              {whatsappTemplate ? (
+                <Card variant="outlined">
                   <CardContent>
                     <Stack spacing={1.5}>
                       <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1.5}>
-                        <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
-                          {templateLabel(template.type)}
-                        </Typography>
+                        <Box>
+                          <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                            WhatsApp Template
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            Separate storage for message text and share image.
+                          </Typography>
+                        </Box>
                         <FormControlLabel
                           control={
                             <Switch
-                              checked={template.enabled}
-                              onChange={(event) => setTemplateField(template.type, { enabled: event.target.checked })}
+                              checked={whatsappTemplate.enabled}
+                              onChange={(event) => setTemplateField('WHATSAPP', { enabled: event.target.checked })}
                               disabled={!canEdit}
                             />
                           }
-                          label={template.enabled ? 'Enabled' : 'Disabled'}
+                          label={whatsappTemplate.enabled ? 'Enabled' : 'Disabled'}
                         />
                       </Stack>
 
                       <TextField
-                        label="Template Name"
-                        value={template.name}
-                        onChange={(event) => setTemplateField(template.type, { name: event.target.value })}
+                        label="WhatsApp Template Name"
+                        value={whatsappTemplate.name}
+                        onChange={(event) => setTemplateField('WHATSAPP', { name: event.target.value })}
                         disabled={!canEdit}
                         fullWidth
                       />
                       <TextField
-                        label="Template Body"
-                        value={template.body}
-                        onChange={(event) => setTemplateField(template.type, { body: event.target.value })}
+                        label="WhatsApp Message Body"
+                        value={whatsappTemplate.body}
+                        onChange={(event) => setTemplateField('WHATSAPP', { body: event.target.value })}
                         disabled={!canEdit}
                         multiline
                         minRows={5}
                         fullWidth
                       />
+
+                      <Box>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                          WhatsApp Template Image
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.4 }}>
+                          {templateImageHelp('WHATSAPP')}
+                        </Typography>
+                      </Box>
+
+                      {whatsappTemplate.imageUrl && (
+                        <Box
+                          component="img"
+                          src={whatsappTemplate.imageUrl}
+                          alt="WhatsApp template preview"
+                          sx={{
+                            width: '100%',
+                            height: 160,
+                            objectFit: 'cover',
+                            borderRadius: 3,
+                            border: '1px solid',
+                            borderColor: 'divider',
+                            backgroundColor: '#fff'
+                          }}
+                        />
+                      )}
 
                       <Box
                         sx={{
@@ -533,122 +704,281 @@ export default function FieldContentSettings({
                           border: '1px solid',
                           borderColor: 'divider',
                           borderRadius: 3,
-                          backgroundColor: template.type === 'WHATSAPP' ? '#edf4ff' : 'background.paper'
+                          backgroundColor: '#edf4ff'
                         }}
                       >
                         <Typography variant="caption" color="text.secondary">
-                          Live Preview
+                          WhatsApp Preview
                         </Typography>
-                        {template.type === 'WHATSAPP' && template.imageUrl && (
-                          <Box
-                            component="img"
-                            src={template.imageUrl}
-                            alt={`${templateLabel(template.type)} asset`}
-                            sx={{
-                              mt: 1,
-                              width: '100%',
-                              maxWidth: 240,
-                              height: 120,
-                              objectFit: 'cover',
-                              borderRadius: 3,
-                              border: '1px solid',
-                              borderColor: 'divider'
-                            }}
-                          />
-                        )}
-                        <Typography
-                          variant="body2"
-                          sx={{
-                            mt: 1,
-                            whiteSpace: 'pre-wrap',
-                            lineHeight: 1.6,
-                            fontFamily: 'inherit'
-                          }}
-                        >
-                          {getPreviewText(template)}
+                        <Typography variant="body2" sx={{ mt: 1, whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
+                          {getPreviewText(whatsappTemplate)}
                         </Typography>
                       </Box>
 
-                      {template.type === 'WHATSAPP' && (
-                        <Stack spacing={1.25}>
-                          {template.imageUrl && (
-                            <Box
-                              component="img"
-                              src={template.imageUrl}
-                              alt={`${templateLabel(template.type)} preview`}
-                              sx={{
-                                width: '100%',
-                                maxWidth: 240,
-                                height: 120,
-                                objectFit: 'cover',
-                                borderRadius: 3,
-                                border: '1px solid',
-                                borderColor: 'divider'
-                              }}
-                            />
-                          )}
-                          {canEdit && (
-                            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
-                              <Button
-                                component="label"
-                                variant="outlined"
-                                startIcon={<AddPhotoAlternateRoundedIcon />}
-                                disabled={busyKey === `template:${template.type}`}
-                              >
-                                Upload Image
-                                <input
-                                  hidden
-                                  type="file"
-                                  accept="image/*"
-                                  onChange={async (event) => {
-                                    const file = event.target.files?.[0];
-                                    if (!file) return;
-
-                                    setBusyKey(`template:${template.type}`);
-                                    setNotice('');
-                                    setError('');
-
-                                    try {
-                                      const image = await uploadImage(file, 'template', template.type);
-                                      setTemplateField(template.type, image);
-                                      setNotice(`${templateLabel(template.type)} image uploaded. Save template to publish it.`);
-                                    } catch (uploadError) {
-                                      setError(uploadError instanceof Error ? uploadError.message : 'Image upload failed');
-                                    } finally {
-                                      setBusyKey('');
-                                      event.target.value = '';
-                                    }
-                                  }}
-                                />
-                              </Button>
-                              <Button
-                                variant="text"
-                                onClick={() => setTemplateField(template.type, { imagePath: null, imageUrl: null })}
-                                disabled={busyKey === `template:${template.type}`}
-                              >
-                                Clear Image
-                              </Button>
-                            </Stack>
-                          )}
-                        </Stack>
-                      )}
-
                       {canEdit && (
-                        <Stack direction="row" justifyContent="flex-end">
-                          <Button
-                            variant="contained"
-                            startIcon={<SaveRoundedIcon />}
-                            onClick={() => void saveTemplate(template)}
-                            disabled={busyKey === `template:${template.type}`}
-                          >
-                            {busyKey === `template:${template.type}` ? 'Saving...' : 'Save Template'}
-                          </Button>
+                        <Stack spacing={1.25}>
+                          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                            <Button
+                              component="label"
+                              variant="outlined"
+                              startIcon={<AddPhotoAlternateRoundedIcon />}
+                              disabled={busyKey === 'template:WHATSAPP' || busyKey === 'template-delete:WHATSAPP'}
+                            >
+                              Upload WhatsApp Image
+                              <input
+                                hidden
+                                type="file"
+                                accept="image/*"
+                                onChange={async (event) => {
+                                  const file = event.target.files?.[0];
+                                  if (!file) return;
+
+                                  setBusyKey('template:WHATSAPP');
+                                  setNotice('');
+                                  setError('');
+
+                                  try {
+                                    const image = await uploadImage(file, 'template', {
+                                      templateType: 'WHATSAPP',
+                                      existingPath: whatsappTemplate.imagePath
+                                    });
+                                    const updatedTemplate = { ...whatsappTemplate, ...image };
+                                    setTemplateField('WHATSAPP', image);
+                                    setNotice('WhatsApp image uploaded. Saving...');
+                                    setTemplates((current) =>
+                                      current.map((template) =>
+                                        template.type === 'WHATSAPP' ? updatedTemplate : template
+                                      )
+                                    );
+                                    await saveTemplate('WHATSAPP', updatedTemplate);
+                                  } catch (uploadError) {
+                                    setError(uploadError instanceof Error ? uploadError.message : 'Image upload failed');
+                                  } finally {
+                                    setBusyKey('');
+                                    event.target.value = '';
+                                  }
+                                }}
+                              />
+                            </Button>
+                            <Button
+                              variant="text"
+                              onClick={() => setTemplateField('WHATSAPP', { imagePath: null, imageUrl: null })}
+                              disabled={busyKey === 'template:WHATSAPP' || busyKey === 'template-delete:WHATSAPP'}
+                            >
+                              Clear WhatsApp Image
+                            </Button>
+                            <Button
+                              variant="text"
+                              color="error"
+                              startIcon={<DeleteOutlineRoundedIcon />}
+                              onClick={() => void deleteTemplate('WHATSAPP')}
+                              disabled={busyKey === 'template:WHATSAPP' || busyKey === 'template-delete:WHATSAPP'}
+                            >
+                              {busyKey === 'template-delete:WHATSAPP' ? 'Deleting...' : 'Delete WhatsApp Template'}
+                            </Button>
+                          </Stack>
+                          <Stack direction="row" justifyContent="flex-end">
+                            <Button
+                              variant="contained"
+                              startIcon={<SaveRoundedIcon />}
+                              onClick={() => void saveTemplate('WHATSAPP')}
+                              disabled={busyKey === 'template:WHATSAPP' || busyKey === 'template-delete:WHATSAPP'}
+                            >
+                              {busyKey === 'template:WHATSAPP' ? 'Saving...' : 'Save WhatsApp Template'}
+                            </Button>
+                          </Stack>
                         </Stack>
                       )}
                     </Stack>
                   </CardContent>
                 </Card>
-              ))}
+              ) : null}
+
+              {thermalTemplate ? (
+                <Card variant="outlined">
+                  <CardContent>
+                    <Stack spacing={1.5}>
+                      <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1.5}>
+                        <Box>
+                          <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
+                            Thermal Print Template
+                          </Typography>
+                          <Typography variant="body2" color="text.secondary">
+                            Separate storage for print layout labels and print image.
+                          </Typography>
+                        </Box>
+                        <FormControlLabel
+                          control={
+                            <Switch
+                              checked={thermalTemplate.enabled}
+                              onChange={(event) => setTemplateField('THERMAL_PRINT', { enabled: event.target.checked })}
+                              disabled={!canEdit}
+                            />
+                          }
+                          label={thermalTemplate.enabled ? 'Enabled' : 'Disabled'}
+                        />
+                      </Stack>
+
+                      <TextField
+                        label="Thermal Template Name"
+                        value={thermalTemplate.name}
+                        onChange={(event) => setTemplateField('THERMAL_PRINT', { name: event.target.value })}
+                        disabled={!canEdit}
+                        fullWidth
+                      />
+
+                      <Stack spacing={1.25}>
+                        <Typography variant="body2" color="text.secondary">
+                          Build the print slip in sections: header, voter details, cut line, print image, and footer text.
+                        </Typography>
+                        <Box
+                          sx={{
+                            display: 'grid',
+                            gap: 1.25,
+                            gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' }
+                          }}
+                        >
+                          {THERMAL_TEXT_FIELDS.map((field) => (
+                            <TextField
+                              key={field.key}
+                              label={field.label}
+                              value={parseThermalPrintTemplateConfig(thermalTemplate.body)[field.key] ?? ''}
+                              onChange={(event) =>
+                                setThermalTemplateField('THERMAL_PRINT', field.key, event.target.value)
+                              }
+                              disabled={!canEdit}
+                              multiline={Boolean(field.rows)}
+                              minRows={field.rows}
+                              fullWidth
+                            />
+                          ))}
+                        </Box>
+                      </Stack>
+
+                      <Box>
+                        <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
+                          Thermal Print Image
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.4 }}>
+                          {templateImageHelp('THERMAL_PRINT')}
+                        </Typography>
+                      </Box>
+
+                      {thermalTemplate.imageUrl && (
+                        <Box
+                          component="img"
+                          src={thermalTemplate.imageUrl}
+                          alt="Thermal print image preview"
+                          sx={{
+                            width: '100%',
+                            height: 160,
+                            objectFit: 'contain',
+                            borderRadius: 3,
+                            border: '1px solid',
+                            borderColor: 'divider',
+                            backgroundColor: '#fff'
+                          }}
+                        />
+                      )}
+
+                      <Box
+                        sx={{
+                          p: 1.5,
+                          border: '1px solid',
+                          borderColor: 'divider',
+                          borderRadius: 3,
+                          backgroundColor: '#f7f7f7'
+                        }}
+                      >
+                        <Typography variant="caption" color="text.secondary">
+                          Thermal Print Preview
+                        </Typography>
+                        <Typography
+                          variant="body2"
+                          sx={{ mt: 1, whiteSpace: 'pre-wrap', lineHeight: 1.6, fontFamily: 'monospace' }}
+                        >
+                          {getPreviewText(thermalTemplate)}
+                        </Typography>
+                      </Box>
+
+                      {canEdit && (
+                        <Stack spacing={1.25}>
+                          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1}>
+                            <Button
+                              component="label"
+                              variant="outlined"
+                              startIcon={<AddPhotoAlternateRoundedIcon />}
+                              disabled={busyKey === 'template:THERMAL_PRINT' || busyKey === 'template-delete:THERMAL_PRINT'}
+                            >
+                              Upload Thermal Image
+                              <input
+                                hidden
+                                type="file"
+                                accept="image/*"
+                                onChange={async (event) => {
+                                  const file = event.target.files?.[0];
+                                  if (!file) return;
+
+                                  setBusyKey('template:THERMAL_PRINT');
+                                  setNotice('');
+                                  setError('');
+
+                                  try {
+                                    const image = await uploadImage(file, 'template', {
+                                      templateType: 'THERMAL_PRINT',
+                                      existingPath: thermalTemplate.imagePath
+                                    });
+                                    const updatedTemplate = { ...thermalTemplate, ...image };
+                                    setTemplateField('THERMAL_PRINT', image);
+                                    setNotice('Thermal image uploaded. Saving...');
+                                    setTemplates((current) =>
+                                      current.map((template) =>
+                                        template.type === 'THERMAL_PRINT' ? updatedTemplate : template
+                                      )
+                                    );
+                                    await saveTemplate('THERMAL_PRINT', updatedTemplate);
+                                  } catch (uploadError) {
+                                    setError(uploadError instanceof Error ? uploadError.message : 'Image upload failed');
+                                  } finally {
+                                    setBusyKey('');
+                                    event.target.value = '';
+                                  }
+                                }}
+                              />
+                            </Button>
+                            <Button
+                              variant="text"
+                              onClick={() => setTemplateField('THERMAL_PRINT', { imagePath: null, imageUrl: null })}
+                              disabled={busyKey === 'template:THERMAL_PRINT' || busyKey === 'template-delete:THERMAL_PRINT'}
+                            >
+                              Clear Thermal Image
+                            </Button>
+                            <Button
+                              variant="text"
+                              color="error"
+                              startIcon={<DeleteOutlineRoundedIcon />}
+                              onClick={() => void deleteTemplate('THERMAL_PRINT')}
+                              disabled={busyKey === 'template:THERMAL_PRINT' || busyKey === 'template-delete:THERMAL_PRINT'}
+                            >
+                              {busyKey === 'template-delete:THERMAL_PRINT' ? 'Deleting...' : 'Delete Thermal Template'}
+                            </Button>
+                          </Stack>
+                          <Stack direction="row" justifyContent="flex-end">
+                            <Button
+                              variant="contained"
+                              startIcon={<SaveRoundedIcon />}
+                              onClick={() => void saveTemplate('THERMAL_PRINT')}
+                              disabled={busyKey === 'template:THERMAL_PRINT' || busyKey === 'template-delete:THERMAL_PRINT'}
+                            >
+                              {busyKey === 'template:THERMAL_PRINT' ? 'Saving...' : 'Save Thermal Template'}
+                            </Button>
+                          </Stack>
+                        </Stack>
+                      )}
+                    </Stack>
+                  </CardContent>
+                </Card>
+              ) : null}
             </Stack>
           </Stack>
         </CardContent>

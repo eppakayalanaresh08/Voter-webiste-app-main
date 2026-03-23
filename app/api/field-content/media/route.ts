@@ -8,7 +8,8 @@ export const runtime = 'nodejs';
 
 const MetaSchema = z.object({
   kind: z.enum(['banner', 'template']),
-  templateType: z.enum(['WHATSAPP', 'THERMAL_PRINT']).optional()
+  templateType: z.enum(['WHATSAPP', 'THERMAL_PRINT']).nullable().optional(),
+  existingPath: z.string().nullable().optional()
 });
 
 function sanitizeFileName(value: string) {
@@ -17,21 +18,26 @@ function sanitizeFileName(value: string) {
 
 export async function POST(req: Request) {
   const profile = await getProfile();
-  if (!profile?.tenant_id || profile.role !== 'ASPIRANT') {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  const tenantId = profile?.tenant_id;
+
+  if (!tenantId || profile.role !== 'ASPIRANT') {
+    return NextResponse.json({ error: 'Unauthorized. Only aspirant workspace owners can upload content.' }, { status: 401 });
   }
 
   const form = await req.formData();
   const parsed = MetaSchema.safeParse({
     kind: form.get('kind'),
-    templateType: form.get('templateType')
+    templateType: form.get('templateType'),
+    existingPath: form.get('existingPath')
   });
 
   if (!parsed.success) {
     return NextResponse.json({ error: 'Invalid upload metadata', details: parsed.error.flatten() }, { status: 400 });
   }
 
-  if (parsed.data.kind === 'template' && !parsed.data.templateType) {
+  const { kind, templateType, existingPath } = parsed.data;
+
+  if (kind === 'template' && !templateType) {
     return NextResponse.json({ error: 'Template image uploads require a template type' }, { status: 400 });
   }
 
@@ -45,20 +51,42 @@ export async function POST(req: Request) {
   const admin = await supabaseServer();
   const bucket = getFieldAssetBucket();
   const extension = file.name.includes('.') ? file.name.slice(file.name.lastIndexOf('.')) : '.png';
-  const prefix = parsed.data.kind === 'banner' ? 'banners' : `templates/${parsed.data.templateType?.toLowerCase() ?? 'asset'}`;
-  const storagePath = `${profile.tenant_id}/${prefix}/${Date.now()}-${sanitizeFileName(file.name || `asset${extension}`)}`;
+  
+  // Use a stable path for templates to naturally overwrite (upsert)
+  // For banners, we use a timestamp but we will delete the old one below
+  const storagePath =
+    kind === 'banner'
+      ? `${tenantId}/banners/${Date.now()}-${sanitizeFileName(file.name || `asset${extension}`)}`
+      : `${tenantId}/templates/${templateType?.toLowerCase() ?? 'asset'}/current`;
+  
   const bytes = new Uint8Array(await file.arrayBuffer());
+
+  // Delete existing file if provided to ensure singleton storage
+  if (existingPath && existingPath !== storagePath && !/^(https?:)?\/\//i.test(existingPath) && !existingPath.startsWith('/')) {
+    try {
+      await admin.storage.from(bucket).remove([existingPath]);
+    } catch (removeError) {
+      console.error('[upload] Failed to remove old asset:', existingPath, removeError);
+      // Continue upload even if cleanup fails
+    }
+  }
 
   const upload = await admin.storage.from(bucket).upload(storagePath, bytes, {
     contentType: file.type || 'image/png',
-    upsert: false
+    upsert: true // Always upsert for safety
   });
 
   if (upload.error) {
+    console.error('[media-upload] Supabase upload error:', upload.error);
     return NextResponse.json({ error: upload.error.message }, { status: 500 });
   }
 
+  console.log('[media-upload] Successfully uploaded:', storagePath);
+
   const { data: signed, error: signedError } = await admin.storage.from(bucket).createSignedUrl(storagePath, 60 * 60 * 12);
+  if (signedError) {
+    console.error('[media-upload] Failed to generate initial signed URL:', signedError);
+  }
 
   return NextResponse.json({
     ok: true,

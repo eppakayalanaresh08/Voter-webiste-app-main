@@ -1,6 +1,5 @@
 import { supabaseServer } from './supabase-server';
 import {
-  getDefaultFieldBanners,
   mergeTemplatesWithDefaults,
   type FieldContentBanner,
   type FieldContentTemplate
@@ -12,19 +11,26 @@ type BannerRow = {
   subtitle: string | null;
   image_url: string | null;
   enabled: boolean;
-  sort_order: number | null;
   updated_at: string;
 };
 
-type TemplateRow = {
+type TemplateStorageRow = {
   id: string;
-  type: string;
   name: string;
   body: string;
   enabled: boolean;
   image_url: string | null;
   updated_at: string | null;
 };
+
+function isMissingTableError(message: string | undefined) {
+  const lower = message?.toLowerCase() ?? '';
+  return (
+    (lower.includes('relation') && lower.includes('does not exist')) ||
+    (lower.includes('could not find') && lower.includes('table')) ||
+    (lower.includes('schema cache') && lower.includes('table'))
+  );
+}
 
 export function getFieldAssetBucket() {
   return process.env.SUPABASE_STORAGE_BUCKET ?? 'upload';
@@ -70,19 +76,19 @@ function mapBannerRow(row: BannerRow, imageUrl: string | null): FieldContentBann
     imagePath: row.image_url ?? null,
     imageUrl,
     enabled: row.enabled,
-    sortOrder: row.sort_order ?? 0,
+    sortOrder: 0,
     updatedAt: row.updated_at
   };
 }
 
-function mapTemplateRow(row: TemplateRow, imageUrl: string | null): FieldContentTemplate | null {
-  if (row.type !== 'WHATSAPP') {
-    return null;
-  }
-
+function mapTemplateRow(
+  row: TemplateStorageRow,
+  type: FieldContentTemplate['type'],
+  imageUrl: string | null
+): FieldContentTemplate {
   return {
     id: row.id,
-    type: row.type as FieldContentTemplate['type'],
+    type,
     name: row.name,
     body: row.body,
     enabled: row.enabled,
@@ -96,58 +102,103 @@ export async function getTenantFieldContent(tenantId: string, options?: { enable
   const admin = await supabaseServer();
   let bannerQuery = admin
     .from('banners')
-    .select('id, title, subtitle, image_url, enabled, sort_order, updated_at')
+    .select('id, title, subtitle, image_url, enabled, updated_at')
     .eq('tenant_id', tenantId)
-    .order('sort_order', { ascending: true })
-    .order('updated_at', { ascending: false });
+    .order('updated_at', { ascending: true })
+    .order('id', { ascending: true });
 
   if (options?.enabledBannersOnly) {
     bannerQuery = bannerQuery.eq('enabled', true);
   }
 
-  const [bannerResult, templateResult] = await Promise.all([
+  const [bannerResult, whatsappTemplateResult, thermalTemplateResult] = await Promise.all([
     bannerQuery,
     admin
-      .from('templates')
-      .select('id, type, name, body, enabled, image_url, updated_at')
+      .from('whatsapp_templates')
+      .select('id, name, body, enabled, image_url, updated_at')
+      .eq('tenant_id', tenantId)
+      .order('created_at', { ascending: true }),
+    admin
+      .from('thermal_print_templates')
+      .select('id, name, body, enabled, image_url, updated_at')
       .eq('tenant_id', tenantId)
       .order('created_at', { ascending: true })
   ]);
 
   const bannerRows = (bannerResult.data ?? []) as BannerRow[];
-  const templateRows = (templateResult.data ?? []) as TemplateRow[];
+  if (whatsappTemplateResult.error && !isMissingTableError(whatsappTemplateResult.error.message)) {
+    throw new Error(whatsappTemplateResult.error.message);
+  }
 
-  // 1. Collect all paths needing signed URLs
+  if (thermalTemplateResult.error && !isMissingTableError(thermalTemplateResult.error.message)) {
+    throw new Error(thermalTemplateResult.error.message);
+  }
+
+  const whatsappTemplateRows = isMissingTableError(whatsappTemplateResult.error?.message)
+    ? []
+    : ((whatsappTemplateResult.data ?? []) as TemplateStorageRow[]);
+  const thermalTemplateRows = isMissingTableError(thermalTemplateResult.error?.message)
+    ? []
+    : ((thermalTemplateResult.data ?? []) as TemplateStorageRow[]);
+
+  // 1. Collect all paths needing signed URLs (exclude full URLs and local assets starting with /)
   const paths: string[] = [];
-  bannerRows.forEach(r => { if (r.image_url) paths.push(r.image_url); });
-  templateRows.forEach(r => { if (r.image_url) paths.push(r.image_url); });
+  const nonStorageMap = new Map<string, string>();
+  
+  [...bannerRows, ...whatsappTemplateRows, ...thermalTemplateRows].forEach(r => {
+    const path = r.image_url;
+    if (!path) return;
+    
+    if (/^(https?:)?\/\//i.test(path) || path.startsWith('/')) {
+      nonStorageMap.set(path, path);
+    } else {
+      paths.push(path);
+    }
+  });
 
-  // 2. Batch resolve signed URLs
+  // 2. Batch resolve signed URLs for storage paths
   const urlMap = new Map<string, string>();
   if (paths.length > 0) {
     const bucket = getFieldAssetBucket();
-    const { data: signedResults } = await admin.storage
+    const { data: signedResults, error: batchError } = await admin.storage
       .from(bucket)
       .createSignedUrls(paths, 60 * 60 * 12);
     
-    signedResults?.forEach(res => {
-      if (res.signedUrl && res.path) urlMap.set(res.path, res.signedUrl);
+    if (batchError) {
+      console.error(`[field-content] Batch sign URLs failed for bucket "${bucket}":`, batchError.message);
+    }
+
+    signedResults?.forEach((res, index) => {
+      const requestedPath = paths[index];
+      if (res.signedUrl) {
+        urlMap.set(requestedPath, res.signedUrl);
+      } else {
+        // If there's an error for a specific path, it will be in res.error (or just null signedUrl)
+        console.warn(`[field-content] Failed to sign URL for path "${requestedPath}":`, (res as any).error || 'No signed URL returned');
+      }
     });
   }
 
-  // 3. Map rows with resolved URLs
-  const banners = bannerRows.map(row => 
-    mapBannerRow(row, row.image_url ? urlMap.get(row.image_url) ?? null : null)
-  );
+  // 3. Map rows with resolved URLs (either signed storage URL or original non-storage URL)
+  const getUrl = (path: string | null) => {
+    if (!path) return null;
+    return nonStorageMap.get(path) ?? urlMap.get(path) ?? null;
+  };
+
+  const banners = bannerRows.map((row, index) => ({
+    ...mapBannerRow(row, getUrl(row.image_url)),
+    sortOrder: index
+  }));
 
   const templates = mergeTemplatesWithDefaults(
-    templateRows
-      .map(row => mapTemplateRow(row, row.image_url ? urlMap.get(row.image_url) ?? null : null))
-      .filter((t): t is FieldContentTemplate => Boolean(t))
+    [
+      ...whatsappTemplateRows.map((row) => mapTemplateRow(row, 'WHATSAPP', getUrl(row.image_url))),
+      ...thermalTemplateRows.map((row) => mapTemplateRow(row, 'THERMAL_PRINT', getUrl(row.image_url)))
+    ]
   );
 
   return {
-    banners: banners.length ? banners : getDefaultFieldBanners(),
+    banners,
     templates
   };
 }
@@ -165,7 +216,7 @@ export async function getPublicFieldContent() {
   const tenantId = (latestBanner?.tenant_id as string | undefined) ?? null;
   if (!tenantId) {
     return {
-      banners: getDefaultFieldBanners(),
+      banners: [],
       templates: mergeTemplatesWithDefaults([])
     };
   }

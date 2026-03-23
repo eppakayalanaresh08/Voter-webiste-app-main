@@ -10,7 +10,24 @@ type OnboardingMobileHeroProps = {
 };
 
 export default function OnboardingMobileHero({ banners }: OnboardingMobileHeroProps) {
-  const slide = banners.find((b) => b.enabled) ?? banners[0];
+  const enabledBanners = banners.filter((banner) => banner.enabled);
+  const slides = enabledBanners.length ? enabledBanners : banners;
+  const [activeIndex, setActiveIndex] = useState(0);
+  const slide = slides[activeIndex] ?? slides[0];
+
+  useEffect(() => {
+    setActiveIndex(0);
+  }, [slides.length]);
+
+  useEffect(() => {
+    if (slides.length <= 1) return;
+
+    const timer = window.setInterval(() => {
+      setActiveIndex((current) => (current + 1) % slides.length);
+    }, 4500);
+
+    return () => window.clearInterval(timer);
+  }, [slides.length]);
 
   return (
     <Box
@@ -67,6 +84,23 @@ export default function OnboardingMobileHero({ banners }: OnboardingMobileHeroPr
         <Typography sx={{ mt: 0.75, fontSize: 14, lineHeight: 1.7, color: 'rgba(255,255,255,0.84)' }}>
           {slide?.subtitle || 'Upload voter records, organize booths, and manage field teams with a simple workflow.'}
         </Typography>
+
+        {slides.length > 1 && (
+          <Stack direction="row" spacing={0.8} sx={{ mt: 2 }}>
+            {slides.map((item, index) => (
+              <Box
+                key={item.id ?? `${item.sortOrder}-${index}`}
+                sx={{
+                  width: index === activeIndex ? 28 : 8,
+                  height: 8,
+                  borderRadius: 999,
+                  backgroundColor: index === activeIndex ? '#ffffff' : 'rgba(255,255,255,0.36)',
+                  transition: 'all 180ms ease'
+                }}
+              />
+            ))}
+          </Stack>
+        )}
 
         <Stack spacing={1.25} sx={{ mt: 4 }}>
           <Button

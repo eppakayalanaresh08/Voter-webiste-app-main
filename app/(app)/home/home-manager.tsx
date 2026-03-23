@@ -25,7 +25,7 @@ import {
 } from '@mui/material';
 import { db } from '@/lib/offline-db';
 import HomeBannerCarousel from '@/components/content/home-banner-carousel';
-import { type FieldContentBanner } from '@/lib/field-content-shared';
+import { splitBannersForDisplay, type FieldContentBanner } from '@/lib/field-content-shared';
 import { type AppProfile } from '@/lib/auth';
 
 function formatNumber(value: number) {
@@ -279,7 +279,7 @@ export default function HomeManager({ profile }: { profile: AppProfile }) {
     load();
   }, [profile.tenant_id]);
 
-  const banners: FieldContentBanner[] = (data?.banners ?? []).filter(b => b.title === 'Home');
+  const homeBanner = splitBannersForDisplay(data?.banners ?? []).home;
   const overview = data?.overview;
   const isAspirant = profile.role === 'ASPIRANT';
   const actionCards = [
@@ -294,7 +294,7 @@ export default function HomeManager({ profile }: { profile: AppProfile }) {
   if (!overview && !isLoading) {
     return (
       <Stack spacing={2.25} alignItems="stretch">
-        <HomeBannerCarousel banners={banners} />
+        {homeBanner ? <HomeBannerCarousel banners={[homeBanner]} /> : null}
         <Card
           sx={{
             borderRadius: '24px',
@@ -339,7 +339,7 @@ export default function HomeManager({ profile }: { profile: AppProfile }) {
 
   return (
     <Stack spacing={2.25} alignItems="stretch">
-      <HomeBannerCarousel banners={banners} />
+      {homeBanner ? <HomeBannerCarousel banners={[homeBanner]} /> : null}
       <Card
         sx={{
           borderRadius: '24px',

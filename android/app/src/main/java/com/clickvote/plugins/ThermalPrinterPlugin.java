@@ -12,7 +12,13 @@ import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothProfile;
 import android.bluetooth.BluetoothSocket;
 import android.content.Context;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Color;
+import android.graphics.Paint;
 import android.os.Build;
+import android.util.Base64;
 import android.os.ParcelUuid;
 import android.text.TextUtils;
 
@@ -254,8 +260,98 @@ public class ThermalPrinterPlugin extends Plugin {
     });
   }
 
+  @PluginMethod
+  public void printImage(PluginCall call) {
+    final String dataUrl = call.getString("dataUrl");
+    if (TextUtils.isEmpty(dataUrl)) {
+      call.reject("dataUrl is required");
+      return;
+    }
+
+    bridge.execute(() -> {
+      try {
+        ensureConnected();
+        Bitmap bitmap = decodeBitmapFromDataUrl(dataUrl);
+        if (bitmap == null) {
+          throw new IOException("Unable to decode print image");
+        }
+
+        writeBytes(new byte[]{0x1B, 0x40});
+        Thread.sleep(40);
+        writeBytes(new byte[]{0x1B, 0x61, 0x01});
+        writeBitmap(bitmap);
+        writeBytes(new byte[]{0x0A, 0x0A, 0x0A});
+        writeBytes(new byte[]{0x1D, 0x56, 0x41, 0x00});
+
+        JSObject ret = new JSObject();
+        ret.put("success", true);
+        call.resolve(ret);
+      } catch (Exception e) {
+        call.reject("printImage failed: " + e.getMessage(), e);
+      }
+    });
+  }
+
   private void appendLine(StringBuilder sb, String label, String value) {
     sb.append(String.format(Locale.US, "%-10s: %s\n", label, value));
+  }
+
+  private Bitmap decodeBitmapFromDataUrl(String dataUrl) {
+    String raw = dataUrl.trim();
+    int commaIndex = raw.indexOf(',');
+    String base64 = commaIndex >= 0 ? raw.substring(commaIndex + 1) : raw;
+    byte[] bytes = Base64.decode(base64, Base64.DEFAULT);
+    Bitmap source = BitmapFactory.decodeByteArray(bytes, 0, bytes.length);
+    if (source == null) return null;
+    return scaleBitmapToPrinterWidth(source, 384);
+  }
+
+  private Bitmap scaleBitmapToPrinterWidth(Bitmap source, int maxWidth) {
+    if (source.getWidth() <= maxWidth) {
+      return source.copy(Bitmap.Config.ARGB_8888, false);
+    }
+
+    float ratio = (float) maxWidth / (float) source.getWidth();
+    int targetHeight = Math.max(1, Math.round(source.getHeight() * ratio));
+    Bitmap scaled = Bitmap.createBitmap(maxWidth, targetHeight, Bitmap.Config.ARGB_8888);
+    Canvas canvas = new Canvas(scaled);
+    canvas.drawColor(Color.WHITE);
+    Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+    canvas.drawBitmap(source, null, new android.graphics.Rect(0, 0, maxWidth, targetHeight), paint);
+    return scaled;
+  }
+
+  private void writeBitmap(Bitmap bitmap) throws IOException, InterruptedException {
+    int width = bitmap.getWidth();
+    int height = bitmap.getHeight();
+    int widthBytes = (width + 7) / 8;
+    byte[] imageBytes = new byte[widthBytes * height];
+
+    for (int y = 0; y < height; y++) {
+      for (int x = 0; x < width; x++) {
+        int color = bitmap.getPixel(x, y);
+        int gray = (int) (0.299 * Color.red(color) + 0.587 * Color.green(color) + 0.114 * Color.blue(color));
+        boolean isBlack = gray < 180;
+        if (isBlack) {
+          int index = y * widthBytes + (x / 8);
+          imageBytes[index] |= (byte) (0x80 >> (x % 8));
+        }
+      }
+    }
+
+    byte xL = (byte) (widthBytes & 0xFF);
+    byte xH = (byte) ((widthBytes >> 8) & 0xFF);
+    byte yL = (byte) (height & 0xFF);
+    byte yH = (byte) ((height >> 8) & 0xFF);
+
+    writeBytes(new byte[]{0x1D, 0x76, 0x30, 0x00, xL, xH, yL, yH});
+
+    final int chunkSize = 512;
+    for (int i = 0; i < imageBytes.length; i += chunkSize) {
+      int end = Math.min(i + chunkSize, imageBytes.length);
+      writeBytes(Arrays.copyOfRange(imageBytes, i, end));
+      Thread.sleep(20);
+    }
   }
 
   private String safe(String value) {

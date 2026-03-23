@@ -1,4 +1,4 @@
-export const TEMPLATE_TYPES = ['WHATSAPP'] as const;
+export const TEMPLATE_TYPES = ['WHATSAPP', 'THERMAL_PRINT'] as const;
 
 export type TemplateType = (typeof TEMPLATE_TYPES)[number];
 
@@ -39,62 +39,43 @@ export const FIELD_TEMPLATE_TOKENS = [
   '{{sex}}'
 ] as const;
 
+export type BannerDisplayContent = {
+  home: FieldContentBanner | null;
+  onboarding: FieldContentBanner[];
+};
+
 export function getDefaultFieldBanners(): FieldContentBanner[] {
-  return [
-    {
-      id: null,
-      title: 'Home',
-      subtitle: 'Manage voter data in one place with a simple workflow.',
-      imagePath: '/icons/icon-512.png',
-      imageUrl: '/icons/icon-512.png',
-      enabled: true,
-      sortOrder: 0,
-      updatedAt: null
-    },
-    {
-      id: null,
-      title: 'Onboarding',
-      subtitle: 'Keep booth operations structured with clean access and faster execution.',
-      imagePath: '/icons/icon-512.png',
-      imageUrl: '/icons/icon-512.png',
-      enabled: true,
-      sortOrder: 1,
-      updatedAt: null
-    }
-  ];
+  return [];
+}
+
+export function splitBannersForDisplay(input: FieldContentBanner[]): BannerDisplayContent {
+  const banners = [...input].sort((left, right) => left.sortOrder - right.sortOrder);
+  const home = banners[0] ?? null;
+  const onboarding = banners.slice(1);
+
+  return {
+    home,
+    onboarding
+  };
 }
 
 export function getDefaultFieldTemplates(): FieldContentTemplate[] {
-  return [
-    {
-      id: null,
-      type: 'WHATSAPP',
-      name: 'WhatsApp Message',
-      body:
-        'Hello {{voter_name}},\nBooth {{booth_no}} - {{booth_name}}\nSerial: {{serial_no}}\nEPIC: {{epic_id}}\nHouse: {{house_no}}',
-      enabled: true,
-      imagePath: null,
-      imageUrl: null,
-      updatedAt: null
-    }
-  ];
+  return [];
 }
 
 export function mergeTemplatesWithDefaults(input: Partial<FieldContentTemplate>[]): FieldContentTemplate[] {
-  const defaults = new Map(getDefaultFieldTemplates().map((template) => [template.type, template]));
-
-  for (const partial of input) {
-    if (!partial.type || !defaults.has(partial.type)) continue;
-    const current = defaults.get(partial.type)!;
-    defaults.set(partial.type, {
-      ...current,
-      ...partial
-    });
-  }
-
-  return TEMPLATE_TYPES.map((type) => defaults.get(type)!);
+  return input.filter(
+    (template): template is FieldContentTemplate =>
+      Boolean(
+        template.type &&
+          (template.type === 'WHATSAPP' || template.type === 'THERMAL_PRINT') &&
+          typeof template.name === 'string' &&
+          typeof template.body === 'string' &&
+          typeof template.enabled === 'boolean'
+      )
+  );
 }
 
-export function templateByType(templates: FieldContentTemplate[], type: TemplateType): FieldContentTemplate {
-  return mergeTemplatesWithDefaults(templates).find((template) => template.type === type)!;
+export function templateByType(templates: FieldContentTemplate[], type: TemplateType): FieldContentTemplate | null {
+  return mergeTemplatesWithDefaults(templates).find((template) => template.type === type) ?? null;
 }
