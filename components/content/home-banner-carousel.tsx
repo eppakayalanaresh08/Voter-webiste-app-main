@@ -11,10 +11,11 @@ export default function HomeBannerCarousel({ banners }: { banners: FieldContentB
   return (
     <Box
       sx={{
+        width: '100%',
         position: 'relative',
         overflow: 'hidden',
         borderRadius: '24px',
-        minHeight: 180,
+        minHeight: { xs: 150, sm: 180 },
         backgroundColor: '#0b57d0'
       }}
     >

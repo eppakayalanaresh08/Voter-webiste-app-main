@@ -38,15 +38,33 @@ function formatPercent(value: number) {
 
 function StatCard({ label, value, caption, isLoading }: { label: string; value: string; caption: string; isLoading?: boolean }) {
   return (
-    <Card sx={{ borderRadius: '20px', height: '100%', display: 'flex', flexDirection: 'column' }}>
-      <CardContent sx={{ p: { xs: 1.75, sm: 2 }, height: '100%' }}>
+    <Card
+      sx={{
+        width: '100%',
+        borderRadius: { xs: '18px', sm: '20px' },
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden'
+      }}
+    >
+      <CardContent sx={{ p: { xs: 1.5, sm: 2 }, height: '100%' }}>
         <Typography variant="overline" color="text.secondary">
           {label}
         </Typography>
         {isLoading ? (
           <Skeleton variant="text" sx={{ fontSize: '1.5rem', mt: 0.5, width: '60%' }} />
         ) : (
-          <Typography variant="h5" sx={{ mt: 0.5, fontWeight: 800 }}>
+          <Typography
+            variant="h5"
+            sx={{
+              mt: 0.5,
+              fontWeight: 800,
+              fontSize: { xs: '1.7rem', sm: '2.4rem' },
+              lineHeight: 1.1,
+              wordBreak: 'break-word'
+            }}
+          >
             {value}
           </Typography>
         )}
@@ -342,6 +360,7 @@ export default function HomeManager({ profile }: { profile: AppProfile }) {
       {homeBanner ? <HomeBannerCarousel banners={[homeBanner]} /> : null}
       <Card
         sx={{
+          width: '100%',
           borderRadius: '24px',
           backgroundColor: 'primary.main',
           borderColor: 'primary.main',
@@ -349,7 +368,7 @@ export default function HomeManager({ profile }: { profile: AppProfile }) {
           minHeight: 180
         }}
       >
-        <CardContent sx={{ p: { xs: 2, sm: 2.25 } }}>
+        <CardContent sx={{ p: { xs: 1.75, sm: 2.25 } }}>
           <Stack
             direction={{ xs: 'column', sm: 'row' }}
             justifyContent="space-between"
@@ -360,13 +379,29 @@ export default function HomeManager({ profile }: { profile: AppProfile }) {
               <Typography variant="overline" sx={{ color: 'rgba(255,255,255,0.72)' }}>
                 Mobile Dashboard
               </Typography>
-              <Typography variant="h5" sx={{ mt: 0.75, fontWeight: 800 }}>
+              <Typography
+                variant="h5"
+                sx={{
+                  mt: 0.75,
+                  fontWeight: 800,
+                  fontSize: { xs: '1.65rem', sm: '2rem' },
+                  lineHeight: 1.1,
+                  wordBreak: 'break-word'
+                }}
+              >
                 {profile.full_name ?? 'Field User'}
               </Typography>
               {isLoading && !overview ? (
                 <Skeleton variant="text" sx={{ mt: 0.75, width: '80%', bgcolor: 'rgba(255,255,255,0.2)' }} />
               ) : (
-                <Typography variant="body2" sx={{ mt: 0.75, color: 'rgba(255,255,255,0.84)' }}>
+                <Typography
+                  variant="body2"
+                  sx={{
+                    mt: 0.75,
+                    color: 'rgba(255,255,255,0.84)',
+                    overflowWrap: 'anywhere'
+                  }}
+                >
                   {overview?.upload.location ?? 'Assigned booth cluster'} · {formatNumber(totalVoters)} voters
                 </Typography>
               )}
@@ -384,7 +419,7 @@ export default function HomeManager({ profile }: { profile: AppProfile }) {
             ) : null}
           </Stack>
 
-          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mt: 2 }}>
+          <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap" sx={{ mt: 2, maxWidth: '100%' }}>
             {isLoading && !overview ? (
               <>
                 <Skeleton variant="rectangular" width={80} height={24} sx={{ borderRadius: '12px', bgcolor: 'rgba(255,255,255,0.2)' }} />
@@ -419,40 +454,39 @@ export default function HomeManager({ profile }: { profile: AppProfile }) {
         ))}
       </Grid> */}
 
-      <Grid container spacing={1.5}>
-        <Grid item xs={12} sm={6}>
-          <StatCard
-            label="Assigned Voters"
-            value={formatNumber(totalVoters)}
-            caption="Search, update, and reach from the field."
-            isLoading={isLoading && !overview}
-          />
-        </Grid>
-        <Grid item xs={12} sm={6}>
-          <StatCard
-            label="Reachable Mobiles"
-            value={formatNumber(overview?.totals.mobile ?? 0)}
-            caption="Direct phone or WhatsApp outreach base."
-            isLoading={isLoading && !overview}
-          />
-        </Grid>
-        <Grid item xs={12} sm={6}>
-          <StatCard
-            label="Issues Tagged"
-            value={formatNumber(overview?.totals.issues ?? 0)}
-            caption="Local issue follow-ups already identified."
-            isLoading={isLoading && !overview}
-          />
-        </Grid>
-        <Grid item xs={12} sm={6}>
-          <StatCard
-            label="Duplicate Checks"
-            value={formatNumber(overview?.totals.potentialDuplicates ?? 0)}
-            caption="Records worth checking on the ground."
-            isLoading={isLoading && !overview}
-          />
-        </Grid>
-      </Grid>
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: { xs: 'minmax(0, 1fr)', sm: 'repeat(2, minmax(0, 1fr))' },
+          gap: 1.5,
+          width: '100%'
+        }}
+      >
+        <StatCard
+          label="Assigned Voters"
+          value={formatNumber(totalVoters)}
+          caption="Search, update, and reach from the field."
+          isLoading={isLoading && !overview}
+        />
+        <StatCard
+          label="Reachable Mobiles"
+          value={formatNumber(overview?.totals.mobile ?? 0)}
+          caption="Direct phone or WhatsApp outreach base."
+          isLoading={isLoading && !overview}
+        />
+        <StatCard
+          label="Issues Tagged"
+          value={formatNumber(overview?.totals.issues ?? 0)}
+          caption="Local issue follow-ups already identified."
+          isLoading={isLoading && !overview}
+        />
+        <StatCard
+          label="Duplicate Checks"
+          value={formatNumber(overview?.totals.potentialDuplicates ?? 0)}
+          caption="Records worth checking on the ground."
+          isLoading={isLoading && !overview}
+        />
+      </Box>
 
       <SectionAccordion
         title="Outreach & Readiness"

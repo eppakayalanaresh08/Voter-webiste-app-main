@@ -24,7 +24,6 @@ import {
   type FieldContentTemplate,
   type TemplateType
 } from '@/lib/field-content-shared';
-import { renderMessageTemplate } from '@/lib/message-templates';
 import type { OfflineVoter } from '@/lib/offline-db';
 import {
   buildThermalPrintPreview,
@@ -32,6 +31,12 @@ import {
   stringifyThermalPrintTemplateConfig,
   type ThermalPrintTemplateConfig
 } from '@/lib/thermal-print-template';
+import {
+  buildWhatsAppPreview,
+  parseWhatsAppTemplateConfig,
+  stringifyWhatsAppTemplateConfig,
+  type WhatsAppTemplateConfig
+} from '@/lib/whatsapp-template';
 
 type BannerDraft = FieldContentBanner & {
   localKey: string;
@@ -96,6 +101,26 @@ const THERMAL_TEXT_FIELDS: Array<{
   { key: 'candidateLine4', label: 'Candidate Line 4' }
 ];
 
+const WHATSAPP_TEXT_FIELDS: Array<{
+  key: keyof WhatsAppTemplateConfig;
+  label: string;
+  rows?: number;
+}> = [
+  { key: 'templateName', label: 'Meta Template Name' },
+  { key: 'languageCode', label: 'Language Code' },
+  { key: 'electionState', label: 'Election State' },
+  { key: 'electionYear', label: 'Election Year' },
+  { key: 'assembly', label: 'Assembly' },
+  { key: 'votingDate', label: 'Voting Date' },
+  { key: 'votingTime', label: 'Voting Time' },
+  { key: 'line12', label: 'Footer Line 12', rows: 2 },
+  { key: 'line13', label: 'Footer Line 13', rows: 2 },
+  { key: 'line14', label: 'Footer Line 14', rows: 2 },
+  { key: 'line15', label: 'Footer Line 15', rows: 2 },
+  { key: 'line16', label: 'Footer Line 16', rows: 2 },
+  { key: 'line17', label: 'Footer Line 17', rows: 2 }
+];
+
 function templateLabel(type: TemplateType) {
   return type === 'THERMAL_PRINT' ? 'Thermal Print' : 'WhatsApp';
 }
@@ -115,7 +140,10 @@ function createEmptyTemplate(type: TemplateType): FieldContentTemplate {
     id: null,
     type,
     name: type === 'THERMAL_PRINT' ? 'Thermal Print Template' : 'WhatsApp Template',
-    body: type === 'THERMAL_PRINT' ? stringifyThermalPrintTemplateConfig(parseThermalPrintTemplateConfig(undefined)) : '',
+    body:
+      type === 'THERMAL_PRINT'
+        ? stringifyThermalPrintTemplateConfig(parseThermalPrintTemplateConfig(undefined))
+        : stringifyWhatsAppTemplateConfig(parseWhatsAppTemplateConfig(undefined)),
     enabled: true,
     imagePath: null,
     imageUrl: null,
@@ -151,7 +179,7 @@ export default function FieldContentSettings({
       return buildThermalPrintPreview(parseThermalPrintTemplateConfig(template.body), SAMPLE_VOTER);
     }
 
-    return renderMessageTemplate(template.body, SAMPLE_VOTER);
+    return buildWhatsAppPreview(parseWhatsAppTemplateConfig(template.body), SAMPLE_VOTER);
   };
 
   const replaceBanners = (nextBanners: FieldContentBanner[], options?: { discardLocalKeys?: string[] }) => {
@@ -211,6 +239,28 @@ export default function FieldContentSettings({
         return {
           ...template,
           body: stringifyThermalPrintTemplateConfig({
+            ...config,
+            [key]: value
+          })
+        };
+      })
+    );
+  };
+
+  const setWhatsAppTemplateField = (
+    key: keyof WhatsAppTemplateConfig,
+    value: string
+  ) => {
+    setTemplates((current) =>
+      current.map((template) => {
+        if (template.type !== 'WHATSAPP') {
+          return template;
+        }
+
+        const config = parseWhatsAppTemplateConfig(template.body);
+        return {
+          ...template,
+          body: stringifyWhatsAppTemplateConfig({
             ...config,
             [key]: value
           })
@@ -662,15 +712,33 @@ export default function FieldContentSettings({
                         disabled={!canEdit}
                         fullWidth
                       />
-                      <TextField
-                        label="WhatsApp Message Body"
-                        value={whatsappTemplate.body}
-                        onChange={(event) => setTemplateField('WHATSAPP', { body: event.target.value })}
-                        disabled={!canEdit}
-                        multiline
-                        minRows={5}
-                        fullWidth
-                      />
+
+                      <Stack spacing={1.25}>
+                        <Typography variant="body2" color="text.secondary">
+                          Configure the Meta payload fields used by WhatsApp share. These values map directly to
+                          {' {{1}} to {{17}} '}in your approved template.
+                        </Typography>
+                        <Box
+                          sx={{
+                            display: 'grid',
+                            gap: 1.25,
+                            gridTemplateColumns: { xs: '1fr', md: 'repeat(2, minmax(0, 1fr))' }
+                          }}
+                        >
+                          {WHATSAPP_TEXT_FIELDS.map((field) => (
+                            <TextField
+                              key={field.key}
+                              label={field.label}
+                              value={parseWhatsAppTemplateConfig(whatsappTemplate.body)[field.key] ?? ''}
+                              onChange={(event) => setWhatsAppTemplateField(field.key, event.target.value)}
+                              disabled={!canEdit}
+                              multiline={Boolean(field.rows)}
+                              minRows={field.rows}
+                              fullWidth
+                            />
+                          ))}
+                        </Box>
+                      </Stack>
 
                       <Box>
                         <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>

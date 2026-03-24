@@ -41,8 +41,12 @@ import {
   parseThermalPrintTemplateConfig,
   resolveThermalPrintTemplate,
 } from "@/lib/thermal-print-template";
-import { renderMessageTemplate } from "@/lib/message-templates";
 import { renderVoterSlipDataUrl } from "@/lib/voter-slip-renderer";
+import {
+  buildWhatsAppPreview,
+  parseWhatsAppTemplateConfig,
+  resolveWhatsAppTemplate,
+} from "@/lib/whatsapp-template";
 
 type EditableVoterFields = Pick<
   OfflineVoter,
@@ -187,10 +191,7 @@ export default function VoterProfileClient() {
     void loadTemplates();
   }, []);
 
-  const whatsappTemplate = useMemo(
-    () => templateByType(templates, "WHATSAPP"),
-    [templates],
-  );
+  const whatsappTemplate = useMemo(() => resolveWhatsAppTemplate(templates), [templates]);
   const thermalPrintTemplate = useMemo(
     () => resolveThermalPrintTemplate(templates),
     [templates],
@@ -211,11 +212,16 @@ export default function VoterProfileClient() {
     ].join("\n");
   }, [voter]);
 
+  const whatsappConfig = useMemo(
+    () => parseWhatsAppTemplateConfig(whatsappTemplate?.body),
+    [whatsappTemplate?.body],
+  );
+
   const whatsappText = useMemo(() => {
     if (!voter) return "";
     if (!whatsappTemplate?.body) return outreachText;
-    return renderMessageTemplate(whatsappTemplate.body, voter);
-  }, [voter, whatsappTemplate?.body, outreachText]);
+    return buildWhatsAppPreview(whatsappConfig, voter);
+  }, [voter, whatsappTemplate?.body, whatsappConfig, outreachText]);
 
   const logAction = async (actionType: string, payload?: unknown) => {
     if (!voter) return;
@@ -265,7 +271,17 @@ export default function VoterProfileClient() {
     await db.voters.put(nextVoter);
     setVoter(nextVoter);
     setStatus("Saved offline. Syncing...");
-    void syncPending().then(() => setStatus("Synced to database."));
+    void syncPending()
+      .then(() => setStatus("Synced to database."))
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes("No offline pack found")) {
+          setStatus("Saved locally. Offline pack not downloaded yet, so sync will happen later.");
+          return;
+        }
+        console.error("[syncPending] failed:", error);
+        setStatus(`Saved locally. Sync pending: ${message}`);
+      });
   };
 
   const submitEditor = async () => {
@@ -299,12 +315,11 @@ export default function VoterProfileClient() {
   const nativeApp = isNativeApp();
   const shareImageUrl = whatsappTemplate?.imageUrl ?? null;
   const thermalPrintImageUrl = thermalPrintTemplate?.imageUrl ?? null;
+  const fallbackWhatsAppImageUrl = "/icons/share.jpeg";
 
   const generateVoterCardBlob = async (): Promise<Blob> => {
-    if (!shareImageUrl) {
-      throw new Error("No WhatsApp template image configured.");
-    }
-    const response = await fetch(shareImageUrl);
+    const imageUrl = shareImageUrl || fallbackWhatsAppImageUrl;
+    const response = await fetch(imageUrl);
     if (!response.ok) {
       throw new Error("Failed to load WhatsApp share image");
     }
@@ -511,19 +526,6 @@ export default function VoterProfileClient() {
                   return;
                 }
 
-                if (nativeApp) {
-                  try {
-                    await openWhatsAppChat(phone, whatsappText || outreachText);
-                    await logAction("WHATSAPP_OPENED", { phone });
-                    setStatus("WhatsApp opened.");
-                  } catch (error) {
-                    const message =
-                      error instanceof Error ? error.message : String(error);
-                    setStatus(`WhatsApp open failed: ${message}`);
-                  }
-                  return;
-                }
-
                 try {
                   setIsSendingWa(true);
                   setStatus("Generating card and sending via WhatsApp...");
@@ -540,11 +542,28 @@ export default function VoterProfileClient() {
                   const formData = new FormData();
                   const toPhone = phone;
                   formData.append("to", toPhone);
+                  formData.append("templateName", whatsappConfig.templateName);
+                  formData.append("languageCode", whatsappConfig.languageCode);
+                  formData.append("electionState", whatsappConfig.electionState);
+                  formData.append("electionYear", whatsappConfig.electionYear);
+                  formData.append("assembly", whatsappConfig.assembly);
                   formData.append("voterName", voter.voter_name || "Voter");
+                  formData.append("relationName", voter.relation_name || "-");
                   formData.append("boothNo", voter.booth_no || "-");
+                  formData.append("serialNo", voter.serial_no || "-");
                   formData.append("epicId", voter.epic_id || "-");
-                  formData.append("houseNo", voter.house_no || "-");
-                  formData.append("phoneNo", voter.mobile_no || "-");
+                  formData.append(
+                    "boothAddress",
+                    [voter.booth_name, voter.booth_address].filter(Boolean).join(", ") || "-"
+                  );
+                  formData.append("votingDate", whatsappConfig.votingDate);
+                  formData.append("votingTime", whatsappConfig.votingTime);
+                  formData.append("line12", whatsappConfig.line12);
+                  formData.append("line13", whatsappConfig.line13);
+                  formData.append("line14", whatsappConfig.line14);
+                  formData.append("line15", whatsappConfig.line15);
+                  formData.append("line16", whatsappConfig.line16);
+                  formData.append("line17", whatsappConfig.line17);
                   formData.append("image", file);
 
                   const res = await fetch("/api/whatsapp", {
@@ -561,31 +580,53 @@ export default function VoterProfileClient() {
                           "Failed to send WhatsApp message",
                       );
                     }
+
+                    const messageId =
+                      typeof json.messageId === "string" ? json.messageId : "";
+                    await logAction("WHATSAPP_SENT", {
+                      phone: toPhone,
+                      messageId,
+                    });
+                    setStatus("WhatsApp message sent successfully!");
+                    return;
                   } else {
                     const text = await res.text();
                     throw new Error(
                       `Server returned non-JSON response: ${text}`,
                     );
                   }
-
-                  await logAction("WHATSAPP_SENT", { phone: toPhone });
-                  setStatus("WhatsApp message sent automatically.");
                 } catch (error: unknown) {
                   const message =
                     error instanceof Error ? error.message : String(error);
                   console.error("WhatsApp Error:", message);
-                  setStatus(`WhatsApp failed: ${message}`);
+
+                  if (nativeApp) {
+                    try {
+                      await openWhatsAppChat(phone, whatsappText || outreachText);
+                      await logAction("WHATSAPP_OPENED", { phone, fallback: "api_failed" });
+                      setStatus(`WhatsApp API failed, so chat was opened instead: ${message}`);
+                    } catch (fallbackError) {
+                      const fallbackMessage =
+                        fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
+                      setStatus(`WhatsApp failed: ${message}. Fallback open also failed: ${fallbackMessage}`);
+                    }
+                  } else {
+                    setStatus(`WhatsApp failed: ${message}`);
+                  }
                 } finally {
                   setIsSendingWa(false);
                 }
               }}
             >
-              {nativeApp ? "Open WhatsApp" : isSendingWa ? "Sending..." : "WhatsApp"}
+              {isSendingWa ? "Sending..." : "Direct WhatsApp"}
             </Button>
           </Box>
 
           {status && (
-            <Alert severity="info" sx={{ mt: 2 }}>
+            <Alert
+              severity={status.includes("successfully") ? "success" : "info"}
+              sx={{ mt: 2 }}
+            >
               {status}
             </Alert>
           )}

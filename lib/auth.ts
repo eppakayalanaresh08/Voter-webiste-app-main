@@ -33,6 +33,46 @@ type ProfileUpsertInput = {
   phone: string;
 };
 
+const activeBootstrapTimers = new Set<string>();
+
+function startTimer(label: string) {
+  if (activeBootstrapTimers.has(label)) return;
+  activeBootstrapTimers.add(label);
+  console.time(label);
+}
+
+function endTimer(label: string) {
+  if (!activeBootstrapTimers.has(label)) return;
+  activeBootstrapTimers.delete(label);
+  console.timeEnd(label);
+}
+
+export function isSupabaseTimeoutError(error: unknown) {
+  if (!error || typeof error !== 'object') return false;
+
+  const err = error as {
+    message?: string;
+    name?: string;
+    cause?: { code?: string; name?: string; message?: string } | null;
+  };
+
+  const message = String(err.message ?? '').toLowerCase();
+  const causeMessage = String(err.cause?.message ?? '').toLowerCase();
+  const causeCode = String(err.cause?.code ?? '').toLowerCase();
+  const name = String(err.name ?? '').toLowerCase();
+  const causeName = String(err.cause?.name ?? '').toLowerCase();
+
+  return (
+    message.includes('fetch failed') ||
+    message.includes('timed out') ||
+    causeMessage.includes('connect timeout') ||
+    causeMessage.includes('timed out') ||
+    causeCode === 'und_err_connect_timeout' ||
+    name === 'connecttimeouterror' ||
+    causeName === 'connecttimeouterror'
+  );
+}
+
 function isDuplicateUserError(message: string) {
   const msg = message.toLowerCase();
   return msg.includes('already') || msg.includes('duplicate');
@@ -237,45 +277,53 @@ async function bootstrapWorkspaceForPhone(phone: string) {
   if (!(await isWorkspaceBootstrapEligible())) return null;
 
   const supabase = await supabaseServer();
+  const createUserTimer = `[bootstrap] auth.admin.createUser:${phone}`;
+  const resolveUserTimer = `[bootstrap] resolveAuthUserIdByPhone:${phone}`;
+  const tenantTimer = `[bootstrap] getOrCreateBootstrapTenantId:${phone}`;
+  const upsertTimer = `[bootstrap] upsertProfileRecord:${phone}`;
 
   console.log(`[bootstrap] Starting for ${phone}...`);
   try {
-    console.time('[bootstrap] auth.admin.createUser');
+    startTimer(createUserTimer);
     const { data: createdUser, error: createErr } = await supabase.auth.admin.createUser({
       phone,
       phone_confirm: true
     });
-    console.timeEnd('[bootstrap] auth.admin.createUser');
+    endTimer(createUserTimer);
 
     if (createErr && !isDuplicateUserError(createErr.message)) {
       throw new Error(`Auth Error: ${createErr.message}`);
     }
 
-    console.time('[bootstrap] resolveAuthUserIdByPhone');
+    startTimer(resolveUserTimer);
     const profileId = await resolveAuthUserIdByPhone(phone, createdUser?.user?.id ?? null);
-    console.timeEnd('[bootstrap] resolveAuthUserIdByPhone');
+    endTimer(resolveUserTimer);
 
-    console.time('[bootstrap] getOrCreateBootstrapTenantId');
+    startTimer(tenantTimer);
     const tenantId = await getOrCreateBootstrapTenantId();
-    console.timeEnd('[bootstrap] getOrCreateBootstrapTenantId');
+    endTimer(tenantTimer);
 
     if (!profileId) {
       throw new Error('Failed to resolve initial admin auth user');
     }
 
-    console.time('[bootstrap] upsertProfileRecord');
+    startTimer(upsertTimer);
     const profile = await upsertProfileRecord({
       id: profileId,
       tenantId,
       role: 'SUPER_ADMIN',
       phone
     });
-    console.timeEnd('[bootstrap] upsertProfileRecord');
+    endTimer(upsertTimer);
 
     return backfillSubUserAssignments(profile);
   } catch (err: any) {
+    endTimer(createUserTimer);
+    endTimer(resolveUserTimer);
+    endTimer(tenantTimer);
+    endTimer(upsertTimer);
     console.error(`[bootstrap] Error for ${phone}:`, err);
-    if (err.message?.includes('fetch failed') || err.name === 'ConnectTimeoutError') {
+    if (isSupabaseTimeoutError(err)) {
       throw new Error('Connection to Supabase timed out. Please check your internet connection or Supabase project status.');
     }
     throw err;
