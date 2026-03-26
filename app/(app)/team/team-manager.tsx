@@ -198,7 +198,7 @@ export default function TeamManager({ upload, initialBoothOptions = [], initialA
 
             <TextField
               label="Phone Number"
-              placeholder="+919866959371"
+              placeholder="+9191XXXXXXXX"
               value={phone}
               onChange={(event) => setPhone(event.target.value)}
               fullWidth

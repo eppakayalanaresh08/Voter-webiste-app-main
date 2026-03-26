@@ -1,6 +1,6 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
-const serverUrl = 'https://voteapp--ai-link-in-bio.us-central1.hosted.app/'
+const serverUrl = 'https://voter-webiste-app-main.vercel.app/'
 
 const config: CapacitorConfig = {
   appId: 'com.clickvote',
