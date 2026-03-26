@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { SESSION_COOKIE_NAME } from '@/lib/session-cookie';
+import { cookies } from 'next/headers';
 
 export const runtime = 'nodejs';
 
@@ -17,6 +18,7 @@ function clearSessionCookie(response: NextResponse) {
 }
 
 export async function POST() {
+  cookies().delete(SESSION_COOKIE_NAME);
   return clearSessionCookie(NextResponse.json({ ok: true }));
 }
 

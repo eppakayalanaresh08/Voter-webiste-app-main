@@ -251,9 +251,8 @@ export default function HomeManager({ profile }: { profile: AppProfile }) {
 
   useEffect(() => {
     const load = async () => {
-      const cacheKey = `home-${profile.tenant_id ?? 'default'}`;
+      const cacheKey = `home-${profile.tenant_id ?? 'default'}-${profile.id}`;
       const cached = await db.homeCache.get(cacheKey);
-      let skipFetch = false;
       if (cached) {
         setData({
           banners: cached.banners as FieldContentBanner[],
@@ -261,16 +260,7 @@ export default function HomeManager({ profile }: { profile: AppProfile }) {
           scope: null
         });
         setIsLoading(false);
-
-        // Throttle: If cache is less than 5 minutes old, skip fresh fetch
-        const cacheAgeMs = Date.now() - new Date(cached.updatedAt).getTime();
-        if (cacheAgeMs < 5 * 60 * 1000) {
-          skipFetch = true;
-          console.log('[HomeManager] Cache is fresh, skipping network fetch');
-        }
       }
-
-      if (skipFetch) return;
 
       try {
         const res = await fetch('/api/home-data');
@@ -384,7 +374,7 @@ export default function HomeManager({ profile }: { profile: AppProfile }) {
                 sx={{
                   mt: 0.75,
                   fontWeight: 800,
-                  fontSize: { xs: '1.65rem', sm: '2rem' },
+                  fontSize: { xs: '1.25rem', sm: '2rem' },
                   lineHeight: 1.1,
                   wordBreak: 'break-word'
                 }}

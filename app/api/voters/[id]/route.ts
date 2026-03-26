@@ -24,5 +24,5 @@ export async function GET(_req: Request, { params }: { params: { id: string } })
     return NextResponse.json({ error: 'Voter not found' }, { status: 404 });
   }
 
-  return NextResponse.json({ voter, relatives });
+  return NextResponse.json({ voter, relatives, uploadId: upload.id });
 }

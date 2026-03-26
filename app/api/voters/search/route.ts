@@ -23,7 +23,7 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: 'No upload assigned' }, { status: 404 });
     }
 
-    return NextResponse.json({ booths });
+    return NextResponse.json({ booths, uploadId: upload.id });
   }
 
   const filters = {
@@ -43,5 +43,5 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: 'No upload assigned' }, { status: 404 });
   }
 
-  return NextResponse.json({ voters });
+  return NextResponse.json({ voters, uploadId: upload.id });
 }

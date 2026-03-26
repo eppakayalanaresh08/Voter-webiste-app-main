@@ -31,6 +31,7 @@ type SearchResponse = {
   error?: string;
   voters?: OfflineVoter[];
   booths?: Array<{ boothNo: string | null; boothName: string | null }>;
+  uploadId?: string;
 };
 
 type FilterKey = 'age' | 'voterName' | 'houseNo' | 'epicId' | 'boothName' | 'phoneNumber';
@@ -271,8 +272,13 @@ export default function SearchPage() {
         if (!res.ok) throw new Error(json?.error ?? 'Search failed');
 
         const voters = (json?.voters ?? []).map(enrich);
-        // Cache locally for future offline use
-        void db.voters.bulkPut(voters);
+        // Cache locally for future offline use and retain the assigned upload for edit sync.
+        void db.transaction('rw', db.voters, db.meta, async () => {
+          await db.voters.bulkPut(voters);
+          if (json?.uploadId) {
+            await db.meta.put({ key: 'upload_id', value: json.uploadId });
+          }
+        });
 
         if (!signal?.aborted) {
           setAllResults(voters);

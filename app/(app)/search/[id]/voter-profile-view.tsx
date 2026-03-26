@@ -141,6 +141,7 @@ export default function VoterProfileClient() {
           error?: string;
           voter?: OfflineVoter;
           relatives?: OfflineVoter[];
+          uploadId?: string;
         } | null;
 
         if (!res.ok || !json?.voter) {
@@ -158,6 +159,10 @@ export default function VoterProfileClient() {
             await db.voters.bulkPut(resolvedRelatives);
           }
         });
+
+        if (json.uploadId) {
+          await db.meta.put({ key: "upload_id", value: json.uploadId });
+        }
 
         setVoter(resolvedVoter);
         setRelatives(resolvedRelatives);
@@ -618,7 +623,7 @@ export default function VoterProfileClient() {
                 }
               }}
             >
-              {isSendingWa ? "Sending..." : "Direct WhatsApp"}
+              {isSendingWa ? "Sending..." : " WhatsApp"}
             </Button>
           </Box>
 

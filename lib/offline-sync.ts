@@ -13,6 +13,32 @@ type SyncResponse = {
   logsInserted: number;
 };
 
+type VoterLookupResponse = {
+  error?: string;
+  uploadId?: string;
+};
+
+async function ensureUploadId() {
+  const uploadMeta = await db.meta.get('upload_id');
+  const existingUploadId = typeof uploadMeta?.value === 'string' ? uploadMeta.value : undefined;
+  if (existingUploadId) return existingUploadId;
+
+  const firstPendingEdit = await db.pendingEdits.orderBy('id').first();
+  const firstPendingLog = await db.pendingLogs.orderBy('id').first();
+  const voterId = firstPendingEdit?.voterId ?? firstPendingLog?.voterId;
+
+  if (!voterId) return undefined;
+
+  const res = await fetch(`/api/voters/${voterId}`);
+  const json = (await res.json().catch(() => null)) as VoterLookupResponse | null;
+  if (!res.ok || !json?.uploadId) {
+    throw new Error(json?.error ?? 'Unable to resolve assigned upload for sync.');
+  }
+
+  await db.meta.put({ key: 'upload_id', value: json.uploadId });
+  return json.uploadId;
+}
+
 export async function downloadOfflinePack(onProgress?: (p: { downloaded: number; status: string }) => void) {
   let cursor: number | null = 0;
   let total = 0;
@@ -45,8 +71,7 @@ export async function downloadOfflinePack(onProgress?: (p: { downloaded: number;
 }
 
 export async function syncPending() {
-  const uploadMeta = await db.meta.get('upload_id');
-  const uploadId = uploadMeta?.value as string | undefined;
+  const uploadId = await ensureUploadId();
   if (!uploadId) throw new Error('No offline pack found. Download first.');
 
   const edits = await db.pendingEdits.toArray();

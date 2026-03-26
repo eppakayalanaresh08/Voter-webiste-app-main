@@ -109,7 +109,7 @@ export default function PhoneAuthCard({ mode }: PhoneAuthCardProps) {
     testSessionInfoRef.current = json.sessionInfo;
     setPhone(json.phone ?? normalizedPhone);
     setStep('OTP');
-    setStatus('Test OTP flow started. Enter the OTP configured in Firebase Console.');
+    setStatus('Enter the OTP');
   };
 
   const sendOtp = async () => {
@@ -259,15 +259,15 @@ export default function PhoneAuthCard({ mode }: PhoneAuthCardProps) {
         </Typography>
 
         <Stack spacing={1.5} sx={{ mt: 2.5 }}>
-          {shouldDisableAppVerificationForTesting && (
+          {/* {shouldDisableAppVerificationForTesting && (
             <Alert severity="info">
               Emulator/dev phone auth mode is active. Use only Firebase configured test phone numbers + OTP.
             </Alert>
-          )}
+          )} */}
 
           <TextField
             label="Phone"
-            placeholder="+919866959371"
+            placeholder="+91XXXXXXXXXX"
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
             autoComplete="tel"

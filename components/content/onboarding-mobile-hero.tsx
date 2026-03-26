@@ -43,7 +43,7 @@ export default function OnboardingMobileHero({ banners }: OnboardingMobileHeroPr
     >
       <Box
         component="img"
-        src={slide?.imageUrl ?? '/icons/icon-512.png'}
+        src="/icons/vote-app.jpeg"
         alt={slide?.title || 'ClickVote banner'}
         sx={{
           position: 'absolute',
@@ -74,15 +74,16 @@ export default function OnboardingMobileHero({ banners }: OnboardingMobileHeroPr
         }}
       >
         <Typography variant="overline" sx={{ color: 'rgba(255,255,255,0.72)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-          Campaign Banner
+          
+            Click Vote 
         </Typography>
 
         <Typography variant="h3" sx={{ mt: 0.75, fontSize: '2.2rem', fontWeight: 700, lineHeight: 1.1, color: '#ffffff' }}>
-          {slide?.title || 'Manage voter data in one place'}
+         Manage voter data in one place
         </Typography>
 
         <Typography sx={{ mt: 0.75, fontSize: 14, lineHeight: 1.7, color: 'rgba(255,255,255,0.84)' }}>
-          {slide?.subtitle || 'Upload voter records, organize booths, and manage field teams with a simple workflow.'}
+        Organize booths, and manage field teams.
         </Typography>
 
         {slides.length > 1 && (
@@ -116,9 +117,9 @@ export default function OnboardingMobileHero({ banners }: OnboardingMobileHeroPr
               '&:hover': { backgroundColor: 'rgba(255,255,255,0.92)' }
             }}
           >
-            I have an account
+            Sign In
           </Button>
-          <Button
+          {/* <Button
             component={NextLink}
             href="/signup"
             variant="text"
@@ -126,7 +127,7 @@ export default function OnboardingMobileHero({ banners }: OnboardingMobileHeroPr
             sx={{ color: '#ffffff', '&:hover': { backgroundColor: 'rgba(255,255,255,0.08)' } }}
           >
             Create account
-          </Button>
+          </Button> */}
         </Stack>
       </Box>
     </Box>

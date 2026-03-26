@@ -106,8 +106,8 @@ const WHATSAPP_TEXT_FIELDS: Array<{
   label: string;
   rows?: number;
 }> = [
-  { key: 'templateName', label: 'Meta Template Name' },
-  { key: 'languageCode', label: 'Language Code' },
+  // { key: 'templateName', label: 'Meta Template Name' },
+  // { key: 'languageCode', label: 'Language Code' },
   { key: 'electionState', label: 'Election State' },
   { key: 'electionYear', label: 'Election Year' },
   { key: 'assembly', label: 'Assembly' },
@@ -461,9 +461,9 @@ export default function FieldContentSettings({
                 <Typography variant="h6" sx={{ fontWeight: 700 }}>
                   Home & Onboarding Banners
                 </Typography>
-                <Typography variant="body2" color="text.secondary">
+                {/* <Typography variant="body2" color="text.secondary">
                   These images power the user onboarding slideshow and the home banner card.
-                </Typography>
+                </Typography> */}
                 <Typography variant="caption" color="text.secondary" sx={{ display: 'block', mt: 0.5 }}>
                   Manual up and down ordering is disabled for the current banner table.
                 </Typography>
@@ -668,11 +668,11 @@ export default function FieldContentSettings({
               )}
             </Stack>
 
-            <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
+            {/* <Stack direction="row" spacing={1} useFlexGap flexWrap="wrap">
               {FIELD_TEMPLATE_TOKENS.map((token) => (
                 <Chip key={token} label={token} size="small" />
               ))}
-            </Stack>
+            </Stack> */}
 
             <Stack spacing={1.5}>
               {!sortedTemplates.length && (
@@ -705,19 +705,19 @@ export default function FieldContentSettings({
                         />
                       </Stack>
 
-                      <TextField
+                      {/* <TextField
                         label="WhatsApp Template Name"
                         value={whatsappTemplate.name}
                         onChange={(event) => setTemplateField('WHATSAPP', { name: event.target.value })}
                         disabled={!canEdit}
                         fullWidth
-                      />
+                      /> */}
 
                       <Stack spacing={1.25}>
-                        <Typography variant="body2" color="text.secondary">
+                        {/* <Typography variant="body2" color="text.secondary">
                           Configure the Meta payload fields used by WhatsApp share. These values map directly to
                           {' {{1}} to {{17}} '}in your approved template.
-                        </Typography>
+                        </Typography> */}
                         <Box
                           sx={{
                             display: 'grid',
@@ -744,9 +744,9 @@ export default function FieldContentSettings({
                         <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
                           WhatsApp Template Image
                         </Typography>
-                        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.4 }}>
+                        {/* <Typography variant="body2" color="text.secondary" sx={{ mt: 0.4 }}>
                           {templateImageHelp('WHATSAPP')}
-                        </Typography>
+                        </Typography> */}
                       </Box>
 
                       {whatsappTemplate.imageUrl && (
@@ -758,7 +758,7 @@ export default function FieldContentSettings({
                             width: '100%',
                             height: 160,
                             objectFit: 'cover',
-                            borderRadius: 3,
+                            borderRadius: 1.5,
                             border: '1px solid',
                             borderColor: 'divider',
                             backgroundColor: '#fff'
@@ -771,7 +771,7 @@ export default function FieldContentSettings({
                           p: 1.5,
                           border: '1px solid',
                           borderColor: 'divider',
-                          borderRadius: 3,
+                          borderRadius: 1.5,
                           backgroundColor: '#edf4ff'
                         }}
                       >
@@ -871,9 +871,9 @@ export default function FieldContentSettings({
                           <Typography variant="subtitle1" sx={{ fontWeight: 700 }}>
                             Thermal Print Template
                           </Typography>
-                          <Typography variant="body2" color="text.secondary">
+                          {/* <Typography variant="body2" color="text.secondary">
                             Separate storage for print layout labels and print image.
-                          </Typography>
+                          </Typography> */}
                         </Box>
                         <FormControlLabel
                           control={
@@ -887,18 +887,18 @@ export default function FieldContentSettings({
                         />
                       </Stack>
 
-                      <TextField
+                      {/* <TextField
                         label="Thermal Template Name"
                         value={thermalTemplate.name}
                         onChange={(event) => setTemplateField('THERMAL_PRINT', { name: event.target.value })}
                         disabled={!canEdit}
                         fullWidth
-                      />
+                      /> */}
 
                       <Stack spacing={1.25}>
-                        <Typography variant="body2" color="text.secondary">
+                        {/* <Typography variant="body2" color="text.secondary">
                           Build the print slip in sections: header, voter details, cut line, print image, and footer text.
-                        </Typography>
+                        </Typography> */}
                         <Box
                           sx={{
                             display: 'grid',
@@ -927,9 +927,9 @@ export default function FieldContentSettings({
                         <Typography variant="subtitle2" sx={{ fontWeight: 700 }}>
                           Thermal Print Image
                         </Typography>
-                        <Typography variant="body2" color="text.secondary" sx={{ mt: 0.4 }}>
+                        {/* <Typography variant="body2" color="text.secondary" sx={{ mt: 0.4 }}>
                           {templateImageHelp('THERMAL_PRINT')}
-                        </Typography>
+                        </Typography> */}
                       </Box>
 
                       {thermalTemplate.imageUrl && (
@@ -941,7 +941,7 @@ export default function FieldContentSettings({
                             width: '100%',
                             height: 160,
                             objectFit: 'contain',
-                            borderRadius: 3,
+                            borderRadius: 1.5,
                             border: '1px solid',
                             borderColor: 'divider',
                             backgroundColor: '#fff'
@@ -954,7 +954,7 @@ export default function FieldContentSettings({
                           p: 1.5,
                           border: '1px solid',
                           borderColor: 'divider',
-                          borderRadius: 3,
+                          borderRadius: 1.5,
                           backgroundColor: '#f7f7f7'
                         }}
                       >
@@ -978,7 +978,7 @@ export default function FieldContentSettings({
                               startIcon={<AddPhotoAlternateRoundedIcon />}
                               disabled={busyKey === 'template:THERMAL_PRINT' || busyKey === 'template-delete:THERMAL_PRINT'}
                             >
-                              Upload Thermal Image
+                              Upload Image
                               <input
                                 hidden
                                 type="file"
@@ -1019,7 +1019,7 @@ export default function FieldContentSettings({
                               onClick={() => setTemplateField('THERMAL_PRINT', { imagePath: null, imageUrl: null })}
                               disabled={busyKey === 'template:THERMAL_PRINT' || busyKey === 'template-delete:THERMAL_PRINT'}
                             >
-                              Clear Thermal Image
+                              Clear Image
                             </Button>
                             <Button
                               variant="text"
